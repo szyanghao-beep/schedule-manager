@@ -9,9 +9,9 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "dist": "electron-builder",
+    "dist": "electron-builder --publish never",
     "dist:dir": "electron-builder --dir",
-    "dist:mac": "electron-builder --mac"
+    "dist:mac": "electron-builder --mac --publish never"
   },
   "devDependencies": {
     "electron": "^43.4.0",
