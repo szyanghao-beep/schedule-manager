@@ -1,0 +1,9 @@
+# 依赖与构建产物
+node_modules/
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+*.log
+.DS_Store
+npm-debug.log*

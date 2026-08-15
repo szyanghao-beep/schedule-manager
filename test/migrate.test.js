@@ -3,7 +3,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { DATA_VERSION, migrateData } = require('../src/shared/migrate.js');
+const { DATA_VERSION, migrateData } = require('../shared/migrate.js');
 
 test('DATA_VERSION 为整数且 >= 1', function () {
   assert.ok(Number.isInteger(DATA_VERSION) && DATA_VERSION >= 1);

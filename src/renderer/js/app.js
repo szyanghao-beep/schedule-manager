@@ -35,6 +35,14 @@ window.App = (function () {
       renderCurrent();
     });
 
+    // 同步拉取到新数据 -> 重新加载并刷新
+    API.onSyncDataUpdated(function () {
+      API.loadData().then(function (loaded) {
+        Store.set(loaded);
+        Toast.info('已同步最新数据');
+      });
+    });
+
     // 导航切换
     document.querySelectorAll('.nav-item').forEach(function (btn) {
       btn.addEventListener('click', function () { switchView(btn.dataset.view); });

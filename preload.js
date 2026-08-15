@@ -3,7 +3,7 @@
  * contextIsolation 开启，渲染进程只能通过 window.api 访问主进程能力。
  */
 const { contextBridge, ipcRenderer } = require('electron');
-const constants = require('./src/shared/constants.js');
+const constants = require('./shared/constants.js');
 
 contextBridge.exposeInMainWorld('api', {
   constants: constants,
@@ -15,4 +15,11 @@ contextBridge.exposeInMainWorld('api', {
   getStatsHistory: function () { return ipcRenderer.invoke('data:statsHistory'); },
   notify: function (opts) { return ipcRenderer.invoke('notify', opts); },
   onReminder: function (cb) { ipcRenderer.on('reminder', function (e, payload) { cb(payload); }); },
+  // 同步
+  loginSync: function (opts) { return ipcRenderer.invoke('sync:login', opts); },
+  syncPull: function () { return ipcRenderer.invoke('sync:pull'); },
+  syncPush: function () { return ipcRenderer.invoke('sync:push'); },
+  syncStatus: function () { return ipcRenderer.invoke('sync:status'); },
+  syncLogout: function () { return ipcRenderer.invoke('sync:logout'); },
+  onSyncDataUpdated: function (cb) { ipcRenderer.on('sync-data-updated', function () { cb(); }); },
 });

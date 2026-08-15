@@ -14,7 +14,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const Utils = require('../src/renderer/js/utils.js');
+const Utils = require('../shared/utils.js');
 const { generateStressData, DAY } = require('./stress-data.js');
 
 const H = 3600000;

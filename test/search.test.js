@@ -3,7 +3,7 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const Utils = require('../src/renderer/js/utils.js');
+const Utils = require('../shared/utils.js');
 
 const t0 = new Date('2026-08-15T09:00:00').getTime();
 const t1 = new Date('2026-08-16T09:00:00').getTime();

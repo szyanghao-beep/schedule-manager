@@ -11,4 +11,11 @@ window.API = {
   getStatsHistory: function () { return window.api.getStatsHistory(); },
   notify: function (opts) { return window.api.notify(opts); },
   onReminder: function (cb) { window.api.onReminder(cb); },
+  // 同步
+  loginSync: function (opts) { return window.api.loginSync(opts); },
+  syncPull: function () { return window.api.syncPull(); },
+  syncPush: function () { return window.api.syncPush(); },
+  syncStatus: function () { return window.api.syncStatus(); },
+  syncLogout: function () { return window.api.syncLogout(); },
+  onSyncDataUpdated: function (cb) { window.api.onSyncDataUpdated(cb); },
 };

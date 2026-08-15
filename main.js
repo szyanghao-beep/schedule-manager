@@ -6,9 +6,10 @@
 const { app, BrowserWindow, ipcMain, Notification, dialog, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const Utils = require('./src/renderer/js/utils.js');
-const constants = require('./src/shared/constants.js');
-const { DATA_VERSION, migrateData } = require('./src/shared/migrate.js');
+const Utils = require('./shared/utils.js');
+const constants = require('./shared/constants.js');
+const { DATA_VERSION, migrateData } = require('./shared/migrate.js');
+const sync = require('./shared/sync.js');
 
 const DATA_FILE = 'data.json';
 const BACKUP_DIR = 'backup';
@@ -23,6 +24,7 @@ let lastCrashAt = 0;    // 上次渲染进程崩溃时间（10s 内不重复重�
 let tray = null;        // 系统托盘
 let isQuitting = false; // 真正退出中（关闭窗口不再拦截为最小化）
 let trayHintShown = false; // 首次最小化到托盘的提示只弹一次
+let syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 }; // 同步配置与游标
 
 // ---------- 路径 ----------
 function dataFilePath() { return path.join(app.getPath('userData'), DATA_FILE); }
@@ -206,6 +208,67 @@ function snapshotStats() {
   scheduleSave();
 }
 
+// ---------- 同步 ----------
+function syncAuthed() { return !!(syncState.serverUrl && syncState.token); }
+
+// 提取本地修改的变更（用 localModifiedAt，客户端时间轴，避免与服务端时间混用）
+function buildLocalChanges(since) {
+  return []
+    .concat(sync.extractLocalChanges(data.categories, sync.ENTITY_TYPES.CATEGORY, since))
+    .concat(sync.extractLocalChanges(data.events, sync.ENTITY_TYPES.EVENT, since))
+    .concat(sync.extractLocalChanges(data.todos, sync.ENTITY_TYPES.TODO, since));
+}
+
+// 把远程变更 LWW 合并进本地数据（含软删除墓碑）
+function applyRemoteChanges(changes) {
+  const map = new Map();
+  sync.recordsToMap(data.categories, sync.ENTITY_TYPES.CATEGORY).forEach(function (v, k) { map.set(k, v); });
+  sync.recordsToMap(data.events, sync.ENTITY_TYPES.EVENT).forEach(function (v, k) { map.set(k, v); });
+  sync.recordsToMap(data.todos, sync.ENTITY_TYPES.TODO).forEach(function (v, k) { map.set(k, v); });
+  sync.mergeChanges(map, changes);
+  data.categories = sync.liveRecords(map, sync.ENTITY_TYPES.CATEGORY);
+  data.events = sync.liveRecords(map, sync.ENTITY_TYPES.EVENT);
+  data.todos = sync.liveRecords(map, sync.ENTITY_TYPES.TODO);
+}
+
+async function syncRequest(method, path, body) {
+  const res = await fetch(syncState.serverUrl + path, {
+    method: method,
+    headers: Object.assign(
+      { 'Authorization': 'Bearer ' + syncState.token },
+      body ? { 'Content-Type': 'application/json' } : {}
+    ),
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const json = await res.json().catch(function () { return {}; });
+  if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
+  return json;
+}
+
+function notifyRendererRefresh() {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('sync-data-updated');
+  }
+}
+
+async function syncPull() {
+  if (!syncAuthed()) throw new Error('未配置同步服务器');
+  const json = await syncRequest('GET', '/api/sync?since=' + syncState.lastPulledAt);
+  applyRemoteChanges(json.changes || []);
+  syncState.lastPulledAt = json.serverTime || Date.now();
+  persistData();
+  notifyRendererRefresh();
+  return { pulled: (json.changes || []).length };
+}
+
+async function syncPush() {
+  if (!syncAuthed()) throw new Error('未配置同步服务器');
+  const changes = buildLocalChanges(syncState.lastPushedAt);
+  await syncRequest('POST', '/api/sync', { changes: changes });
+  syncState.lastPushedAt = Date.now();
+  return { pushed: changes.length };
+}
+
 // ---------- IPC ----------
 function applyImported(parsed) {
   if (!parsed || !Array.isArray(parsed.events) || !Array.isArray(parsed.todos)) {
@@ -300,6 +363,37 @@ function registerIpc() {
     if (Notification.isSupported() && opts && opts.title) {
       new Notification({ title: opts.title, body: opts.body || '' }).show();
     }
+    return true;
+  });
+
+  // ---------- 同步 IPC ----------
+  ipcMain.handle('sync:login', async function (e, opts) {
+    opts = opts || {};
+    if (!opts.serverUrl || !opts.username || !opts.password) {
+      throw new Error('请填写服务器地址、用户名和密码');
+    }
+    syncState.serverUrl = String(opts.serverUrl).replace(/\/+$/, '');
+    const path = opts.register ? '/api/auth/register' : '/api/auth/login';
+    const json = await syncRequest('POST', path, { username: opts.username, password: opts.password });
+    syncState.token = json.token;
+    syncState.lastPulledAt = 0; // 登录后下次同步从全量开始
+    return { token: json.token, user: json.user };
+  });
+
+  ipcMain.handle('sync:pull', function () { return syncPull(); });
+  ipcMain.handle('sync:push', function () { return syncPush(); });
+
+  ipcMain.handle('sync:status', function () {
+    return {
+      serverUrl: syncState.serverUrl,
+      loggedIn: !!syncState.token,
+      lastPulledAt: syncState.lastPulledAt,
+      lastPushedAt: syncState.lastPushedAt,
+    };
+  });
+
+  ipcMain.handle('sync:logout', function () {
+    syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 };
     return true;
   });
 }

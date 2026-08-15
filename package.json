@@ -27,6 +27,7 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "shared/**/*",
       "build/icon.png",
       "package.json"
     ],

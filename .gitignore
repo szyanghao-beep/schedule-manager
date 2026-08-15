@@ -14,3 +14,8 @@ Thumbs.db
 
 # 本地数据备份
 日程数据备份-*.json
+
+# 后端运行时数据库
+server/data.db
+server/data.db-*
+server/*.db

@@ -17,6 +17,31 @@
 
 ## 版本历史
 
+### v1.2.2（待发布）— 多端同步架构（电脑端 + 安卓端 + 自建后端）
+
+**共享包抽取（`shared/`）**
+- 把 `utils.js`（重复展开/四象限/统计/搜索等纯函数）、`constants.js`、`migrate.js` 抽到 `shared/` 作为单一来源，桌面端 main/preload/renderer 与测试统一引用，删除原 `src/` 下的重复文件。
+- 新增 `shared/sync.js`：同步纯函数（LWW 合并、软删除墓碑、增量提取、`extractLocalChanges` 本地修改追踪）。
+- 新增 `shared/model.js`：实体类型契约与 change 校验。
+- `test/sync.test.js`：13 个同步用例，全量测试 94 个用例通过。
+
+**自建后端（`server/`）**
+- Node + Express + 内置 `node:sqlite`（零编译依赖）+ JWT + bcryptjs。
+- 用户注册/登录、记录级增量同步（`GET/POST /api/sync`）、服务端时间仲裁 + LWW 合并、多用户数据隔离。
+- `verify-server.js`：14 项集成测试（注册/登录/增量推送拉取/软删除墓碑/多用户隔离）。
+
+**桌面端改造**
+- `store.js` 改为软删除 + 记录级 `updatedAt`/`localModifiedAt`：删除不再物理移除，`get()` 返回存活视图、`getRaw()` 返回含墓碑完整数据，渲染层行为不变。
+- `main.js` 新增同步 IPC（`sync:login/pull/push/status/logout`）与拉推合并逻辑（复用 `shared/sync`）。
+- 设置页新增「多端同步」卡片：服务器地址/用户名/密码登录注册、立即同步、退出登录。
+- 同步拉取到新数据时自动刷新渲染层。
+
+**React Native 安卓端（`mobile/`）**
+- 完整 RN 项目（22 个文件）：登录/注册、日程（复用 `expandOccurrences` 展开重复）、待办（复用 `calcQuadrant` 四象限徽标 + 完成勾选）、同步客户端（复用 `shared/sync` 拉推合并）。
+- 通过 `metro.config.js` watchFolders 复用 `../shared` 单一来源，未复制未重写。
+
+**说明**：架构与启动步骤见 `SYNC.md`；后端部署见 `server/README.md`；安卓运行见 `mobile/README.md`。
+
 ### v1.2.1（2026-08-15）— 稳定性加固与体验升级
 
 **稳定性与数据安全**

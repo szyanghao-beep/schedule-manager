@@ -110,6 +110,9 @@ window.Modules.settings = (function () {
     btnRow.appendChild(actionBtn('从备份恢复', restoreData));
     dataCard.appendChild(btnRow);
     root.appendChild(dataCard);
+
+    // 多端同步
+    root.appendChild(syncCard());
   }
 
   // 分类行
@@ -183,6 +186,91 @@ window.Modules.settings = (function () {
     const b = el('button', 'btn', label);
     b.addEventListener('click', handler);
     return b;
+  }
+
+  // ---------- 多端同步 ----------
+  function syncCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '多端同步'));
+    const hint = el('div', 'item-meta', '登录自建同步服务器（server/ 目录）后，日程与待办可在电脑、手机间双向同步。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+    const box = el('div');
+    card.appendChild(box);
+    window.API.syncStatus().then(function (st) { renderSyncContent(box, st); })
+      .catch(function () { box.appendChild(el('div', 'placeholder', '同步功能不可用')); });
+    return card;
+  }
+
+  function syncField(label, placeholder, type) {
+    const row = el('div', 'form-row');
+    row.appendChild(el('label', null, label));
+    const input = el('input');
+    input.type = type || 'text';
+    input.placeholder = placeholder || '';
+    row.appendChild(input);
+    return { row: row, input: input };
+  }
+
+  function renderSyncContent(box, st) {
+    window.Dom.clear(box);
+    if (st && st.loggedIn) {
+      box.appendChild(el('div', 'item-meta', '已登录服务器：' + st.serverUrl));
+      const btnRow = el('div', 'toolbar');
+      btnRow.style.marginTop = '8px';
+      const syncBtn = el('button', 'btn btn-primary btn-sm', '立即同步');
+      syncBtn.addEventListener('click', doSync);
+      const logoutBtn = el('button', 'btn btn-sm', '退出登录');
+      logoutBtn.addEventListener('click', function () {
+        window.API.syncLogout().then(function () {
+          window.Toast.success('已退出登录');
+          window.API.syncStatus().then(function (s) { renderSyncContent(box, s); });
+        });
+      });
+      btnRow.appendChild(syncBtn);
+      btnRow.appendChild(logoutBtn);
+      box.appendChild(btnRow);
+    } else {
+      const server = syncField('服务器地址', 'http://192.168.1.100:8787');
+      const user = syncField('用户名', '');
+      const pass = syncField('密码', '', 'password');
+      box.appendChild(server.row);
+      box.appendChild(user.row);
+      box.appendChild(pass.row);
+      const btnRow = el('div', 'toolbar');
+      const loginBtn = el('button', 'btn btn-primary btn-sm', '登录');
+      const regBtn = el('button', 'btn btn-sm', '注册并登录');
+      loginBtn.addEventListener('click', function () { doLogin(server.input.value, user.input.value, pass.input.value, false); });
+      regBtn.addEventListener('click', function () { doLogin(server.input.value, user.input.value, pass.input.value, true); });
+      btnRow.appendChild(loginBtn);
+      btnRow.appendChild(regBtn);
+      box.appendChild(btnRow);
+    }
+  }
+
+  async function doLogin(serverUrl, username, password, register) {
+    if (!serverUrl || !username || !password) {
+      window.Toast.error('请填写服务器地址、用户名和密码');
+      return;
+    }
+    try {
+      await window.API.loginSync({ serverUrl: serverUrl, username: username, password: password, register: register });
+      window.Toast.success(register ? '注册并登录成功' : '登录成功');
+      window.Modules.settings.render();
+    } catch (e) {
+      window.Toast.error('登录失败：' + (e.message || e));
+    }
+  }
+
+  async function doSync() {
+    try {
+      const pull = await window.API.syncPull();
+      const push = await window.API.syncPush();
+      window.Toast.success('同步完成：拉取 ' + pull.pulled + ' 条，推送 ' + push.pushed + ' 条');
+    } catch (e) {
+      window.Toast.error('同步失败：' + (e.message || e));
+    }
   }
 
   async function exportData() {
