@@ -11,13 +11,13 @@
 | 结构 | 主进程 `main.js` + `preload.js`（项目根目录）；渲染层 `src/renderer/` |
 | 数据持久化 | `userData/data.json`，防抖保存 500ms，自动备份（最多 10 份） |
 | 仓库 | https://github.com/szyanghao-beep/schedule-manager.git（分支 `main`） |
-| 当前版本 | **v1.2.1** |
+| 当前版本 | **v1.2.2** |
 
 ---
 
 ## 版本历史
 
-### v1.2.2（待发布）— 多端同步架构（电脑端 + 安卓端 + 自建后端）
+### v1.2.2（2026-08-15）— 多端同步架构（电脑端 + 安卓端 + 自建后端）
 
 **共享包抽取（`shared/`）**
 - 把 `utils.js`（重复展开/四象限/统计/搜索等纯函数）、`constants.js`、`migrate.js` 抽到 `shared/` 作为单一来源，桌面端 main/preload/renderer 与测试统一引用，删除原 `src/` 下的重复文件。
