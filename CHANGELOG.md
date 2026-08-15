@@ -26,6 +26,13 @@
 - **CI 测试门禁**：GitHub Actions 新增 `test` 作业（ubuntu + `npm test`），mac / win 构建依赖其通过，测试失败不再浪费打包时间。
 - **修复 mac 打包配置**：electron-builder 26 中 `arch` 已从 `mac` 顶层移除（`MacConfiguration` 无此属性），改为 `mac.target` 条目内的 `TargetConfiguration.arch`；原 `mac.arch` 写法导致 `dist:mac` schema 校验失败，双架构（x64 + arm64）已按新格式配置。
 
+**统计真实性加固（五轮测试驱动）**
+- **跨天曲线缺失修复**：统计页历史缓存此前只在首次进入时拉取一次，应用跨天后趋势曲线缺少昨日快照；现记录缓存拉取日期，跨天后自动重取。
+- **历史加载失败卡死修复**：`getStatsHistory` 失败后 `historyLoading` 不再永久占用，下次 render 自动重试。
+- **趋势合并逻辑提取**：`stats.js` 的 `mergedTrend` 提取为纯函数 `utils.mergeTrend`（30 天窗口 + 今天实时合并、不伪造缺失日期），供单元测试直接验证曲线真实性。
+- **防御性加固**：`store.set` 对 settings 深合并（防部分字段覆盖丢配置）；主进程 `data:save` 仅接受形状正确的 payload 字段；待办列表 `filteredTodos` 只计算一次（两年数据下避免重复排序）。
+- **新增 `test/trend.realism.test.js`（8 用例）**：历史快照与当日真实分布一致、当天快照仅保留最新、`mergeTrend` 窗口/覆盖/缺日语义、曲线自洽（每点象限和 == total）、趋势/卡片/穿透明细口径同源、90 天逐日快照与月视图展开性能。
+
 **体验升级**
 - **全文搜索**：新增「搜索」视图（导航 + `Ctrl+F` / `Cmd+F` 唤起），检索日程与待办的标题 / 描述 / 分类名，多关键词 AND、大小写不敏感；结果按时间排序并高亮命中词，日程可一键定位到日视图，待办可直接勾选完成 / 编辑；匹配逻辑 `utils.searchItems` 为纯函数，`test/search.test.js` 覆盖 9 类用例。
 - **应用图标**：新增 `build/icon.png`（1024×1024，极简日历图形），electron-builder 打包时自动生成 `.ico` / `.icns`；运行窗口与托盘复用同一图标（`build/icon.png` 纳入打包产物）。
@@ -100,6 +107,7 @@
 
 - **单元 / 边界测试**：`test/utils.quadrant.test.js`（13 个用例，含边界）、`test/utils.boundary.test.js`、`test/store.test.js` 等，运行 `npm test`（`node --test`）。
 - **schema 迁移测试**：`test/migrate.test.js`（8 个用例），覆盖旧数据自动迁移、设置保留、损坏文件防御与幂等性。
+- **趋势真实性专项**：`test/trend.realism.test.js`（8 个用例，两年数据场景），覆盖历史快照真实性、当天快照更新语义、`mergeTrend` 合并窗口、曲线数据自洽与口径一致性、逐日快照与月视图展开性能（90 天快照 ~3ms、700 事件月视图展开 ~20ms）。
 - **抗压测试**：
   - `test/stress-data.js`：确定性数据生成器（mulberry32 伪随机，可复现），2 年跨度、1200 条数据。
   - `test/stress.test.js`：6 项正确性 + 性能测试。

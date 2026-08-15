@@ -312,6 +312,22 @@
     return out;
   }
 
+  // ---- 统计趋势合并（stats.js 使用）----
+  // 把主进程历史快照与「今天」实时值合并为曲线数据：
+  //   - 历史截取最近 30 条；todayEntry 为 { date, q1..q4, total }
+  //   - 历史最后一条是今天 → 覆盖为实时值；否则追加今天
+  //   - 不伪造缺失日期（应用未运行的日期没有快照，曲线如实空缺）
+  function mergeTrend(history, todayEntry) {
+    var list = (history || []).slice(-30);
+    var merged = list.slice();
+    if (todayEntry && todayEntry.date) {
+      var last = merged[merged.length - 1];
+      if (last && last.date === todayEntry.date) merged[merged.length - 1] = todayEntry;
+      else merged.push(todayEntry);
+    }
+    return merged.slice(-30);
+  }
+
   return {
     STATUS: STATUS,
     REPEAT_TYPE: REPEAT_TYPE,
@@ -337,5 +353,6 @@
     calcQuadrantStats: calcQuadrantStats,
     calcDrillItems: calcDrillItems,
     searchItems: searchItems,
+    mergeTrend: mergeTrend,
   };
 }));

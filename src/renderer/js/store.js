@@ -47,6 +47,10 @@ window.Store = (function () {
   function commit() { emit(); scheduleSave(); }
 
   function set(partial) {
+    if (partial && partial.settings && typeof partial.settings === 'object') {
+      // settings 深合并：防止只传部分字段时整体覆盖丢配置
+      partial = Object.assign({}, partial, { settings: Object.assign({}, state.settings, partial.settings) });
+    }
     Object.assign(state, partial);
     commit();
   }

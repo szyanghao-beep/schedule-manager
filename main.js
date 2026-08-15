@@ -232,10 +232,13 @@ function registerIpc() {
 
   ipcMain.handle('data:save', function (e, payload) {
     if (payload && typeof payload === 'object') {
-      data.categories = payload.categories || data.categories;
-      data.events = payload.events || data.events;
-      data.todos = payload.todos || data.todos;
-      data.settings = payload.settings || data.settings;
+      // 防御性校验：只接受形状正确的字段，损坏/异常 payload 不污染内存数据
+      if (Array.isArray(payload.categories)) data.categories = payload.categories;
+      if (Array.isArray(payload.events)) data.events = payload.events;
+      if (Array.isArray(payload.todos)) data.todos = payload.todos;
+      if (payload.settings && typeof payload.settings === 'object') {
+        data.settings = Object.assign(defaultData().settings, payload.settings);
+      }
     }
     scheduleSave();
     return true;

@@ -14,6 +14,7 @@ window.Modules.stats = (function () {
   const Utils = window.Utils;
 
   let historyCache = null; // 主进程历史快照缓存，避免每次重绘都走 IPC
+  let historyCacheDate = null; // 缓存拉取时的日期（跨天后自动重取，避免曲线缺昨日数据）
   let historyLoading = false; // 防止并发重复拉取
   let drill = null;           // 当前穿透状态：{ type, title }
   let trendView = 'chart';    // 趋势展示：chart（堆叠面积图）| list（明细表）
@@ -66,17 +67,25 @@ window.Modules.stats = (function () {
     // 近 30 天趋势（缓存 + 实时合并今天）
     root.appendChild(trendCard(historyCache));
 
-    // 首次进入时异步加载历史快照（仅一次，后续走缓存）
-    if (historyCache == null && !historyLoading) {
-      historyLoading = true;
-      window.API.getStatsHistory().then(function (res) {
-        historyCache = (res && res.statsHistory) || [];
-        historyLoading = false;
-        render();
-      });
+    // 首次进入或跨天后异步重取历史快照（失败不卡死，下次 render 会重试）
+    if (!historyLoading && (historyCache == null || historyCacheDate !== Utils.toDateStr(Date.now()))) {
+      loadHistory();
     }
 
     if (content) content.scrollTop = sc;
+  }
+
+  function loadHistory() {
+    historyLoading = true;
+    window.API.getStatsHistory().then(function (res) {
+      historyCache = (res && res.statsHistory) || [];
+      historyCacheDate = Utils.toDateStr(Date.now());
+      historyLoading = false;
+      render();
+    }).catch(function (err) {
+      console.error('获取统计历史失败', err);
+      historyLoading = false; // 释放锁，避免后续永远不再拉取
+    });
   }
 
   // ---------- 穿透 ----------
@@ -224,30 +233,26 @@ window.Modules.stats = (function () {
     const refresh = el('button', 'btn btn-sm', '刷新');
     refresh.style.marginLeft = '8px';
     refresh.title = '重新读取主进程历史快照';
-    refresh.addEventListener('click', function () { historyCache = null; historyLoading = false; render(); });
+    refresh.addEventListener('click', function () {
+      historyCache = null;
+      historyCacheDate = null;
+      historyLoading = false;
+      render();
+    });
     right.appendChild(refresh);
     head.appendChild(right);
     card.appendChild(head);
 
-    const list = mergedTrend(history);
+    // 实时合并「今天」：保证与顶部四象限卡片一致（纯逻辑见 utils.mergeTrend，已单测）
+    const live = Utils.calcQuadrantStats(Store.get().todos, Date.now(), H.urgentThresholdMs());
+    const todayEntry = { date: Utils.toDateStr(Date.now()), q1: live.q1, q2: live.q2, q3: live.q3, q4: live.q4, total: live.total };
+    const list = Utils.mergeTrend(history, todayEntry);
     if (!list.length) {
       card.appendChild(el('div', 'placeholder', '暂无历史记录（随时间推移会自动累积）'));
       return card;
     }
     card.appendChild(trendView === 'list' ? trendTable(list) : trendChart(list));
     return card;
-  }
-
-  function mergedTrend(history) {
-    const list = (history || []).slice(-30);
-    const todayStr = Utils.toDateStr(Date.now());
-    const live = Utils.calcQuadrantStats(Store.get().todos, Date.now(), H.urgentThresholdMs());
-    const todayEntry = { date: todayStr, q1: live.q1, q2: live.q2, q3: live.q3, q4: live.q4, total: live.total };
-    const merged = list.slice();
-    const last = merged[merged.length - 1];
-    if (last && last.date === todayStr) merged[merged.length - 1] = todayEntry;
-    else merged.push(todayEntry);
-    return merged.slice(-30);
   }
 
   // 堆叠面积图（纯 SVG，无第三方库）：X=日期、Y=未完成待办数，四象限固定配色堆叠

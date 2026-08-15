@@ -42,8 +42,9 @@ window.Modules.todo = (function () {
 
     // 列表
     const list = el('div');
-    filteredTodos().forEach(function (t) { list.appendChild(todoRow(t)); });
-    if (!filteredTodos().length) list.appendChild(el('div', 'placeholder', '暂无待办'));
+    const items = filteredTodos(); // 只计算一次（2 年数据下避免重复 map/filter/sort）
+    items.forEach(function (t) { list.appendChild(todoRow(t)); });
+    if (!items.length) list.appendChild(el('div', 'placeholder', '暂无待办'));
     root.appendChild(list);
   }
 
