@@ -66,6 +66,42 @@ const CATEGORY_COLORS = [
 // 未分类兜底
 const UNCATEGORIZED = { categoryId: '', categoryName: '未分类', categoryColor: '#8a8f98' };
 
+// 四象限（艾森豪威尔矩阵）：重要性手动选择，紧急性由截止时间推导
+const IMPORTANCE = {
+  IMPORTANT: 'important',
+  NOT_IMPORTANT: 'not_important',
+};
+
+const IMPORTANCE_LABEL = {
+  important: '重要',
+  not_important: '不重要',
+};
+
+const QUADRANT = {
+  Q1: 'q1', // 重要且紧急
+  Q2: 'q2', // 重要不紧急
+  Q3: 'q3', // 不重要但紧急
+  Q4: 'q4', // 不重要不紧急
+};
+
+const QUADRANT_LABEL = {
+  q1: '重要且紧急',
+  q2: '重要不紧急',
+  q3: '不重要但紧急',
+  q4: '不重要不紧急',
+};
+
+const QUADRANT_COLOR = {
+  q1: '#e05b5b',
+  q2: '#4f8ef7',
+  q3: '#f2a541',
+  q4: '#8a8f98',
+};
+
+const QUADRANT_ORDER = ['q1', 'q2', 'q3', 'q4'];
+
+const URGENT_THRESHOLD_HOURS = 24; // 截止前多少小时内视为「紧急」
+
 module.exports = {
   STATUS,
   STATUS_LABEL,
@@ -78,4 +114,11 @@ module.exports = {
   DEFAULT_CATEGORIES,
   CATEGORY_COLORS,
   UNCATEGORIZED,
+  IMPORTANCE,
+  IMPORTANCE_LABEL,
+  QUADRANT,
+  QUADRANT_LABEL,
+  QUADRANT_COLOR,
+  QUADRANT_ORDER,
+  URGENT_THRESHOLD_HOURS,
 };

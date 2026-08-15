@@ -49,6 +49,31 @@ window.Modules.settings = (function () {
     remindCard.appendChild(remindRow);
     root.appendChild(remindCard);
 
+    // 时间管理四象限
+    const quadCard = el('div', 'card');
+    quadCard.style.marginTop = '16px';
+    quadCard.appendChild(el('div', 'panel-title', '时间管理四象限'));
+    const quadHint = el('div', 'item-meta', '待办截止前多少小时内视为「紧急」，用于自动划分四象限（重要 × 紧急）。');
+    quadHint.style.margin = '8px 0';
+    quadCard.appendChild(quadHint);
+    const quadRow = el('div', 'form-row');
+    quadRow.appendChild(el('label', null, '紧急阈值'));
+    const quadSel = el('select');
+    [6, 12, 24, 48, 72].forEach(function (h) {
+      const opt = el('option');
+      opt.value = h;
+      opt.textContent = '截止前 ' + h + ' 小时';
+      quadSel.appendChild(opt);
+    });
+    quadSel.value = Store.get().settings.urgentThresholdHours || 24;
+    quadSel.addEventListener('change', function () {
+      Store.set({ settings: Object.assign({}, Store.get().settings, { urgentThresholdHours: Number(quadSel.value) }) });
+      window.Toast.success('已保存');
+    });
+    quadRow.appendChild(quadSel);
+    quadCard.appendChild(quadRow);
+    root.appendChild(quadCard);
+
     // 数据管理
     const dataCard = el('div', 'card');
     dataCard.style.marginTop = '16px';

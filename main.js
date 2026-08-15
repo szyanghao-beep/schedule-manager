@@ -31,7 +31,8 @@ function defaultData() {
     categories: categories,
     events: [],
     todos: [],
-    settings: { defaultRemindBefore: 15 },
+    settings: { defaultRemindBefore: 15, urgentThresholdHours: 24 },
+    statsHistory: [], // 每日四象限分布快照：{ date, q1..q4, total }
     notified: {}, // key(occurrence) -> 通知时间戳，用于去重
   };
 }
@@ -40,7 +41,10 @@ function defaultData() {
 function loadData() {
   try {
     const raw = fs.readFileSync(dataFilePath(), 'utf-8');
-    data = Object.assign(defaultData(), JSON.parse(raw));
+    const parsed = JSON.parse(raw);
+    data = Object.assign(defaultData(), parsed);
+    // 深度合并 settings，确保新增默认字段（如 urgentThresholdHours）在旧数据上也能生效
+    data.settings = Object.assign(defaultData().settings, parsed.settings || {});
   } catch (e) {
     data = defaultData();
   }
@@ -96,6 +100,7 @@ function publicData() {
     events: data.events,
     todos: data.todos,
     settings: data.settings,
+    statsHistory: data.statsHistory || [],
   };
 }
 
@@ -121,10 +126,14 @@ function showNotification(kind, item, occ) {
 
 function checkReminders() {
   if (!data) return;
+  snapshotStats();
   const now = Date.now();
   const list = [];
   data.events.forEach(function (e) { list.push({ kind: 'event', item: e, startTime: e.startTime, endTime: e.endTime }); });
-  data.todos.forEach(function (t) { list.push({ kind: 'todo', item: t, startTime: t.deadline, endTime: t.deadline }); });
+  data.todos.forEach(function (t) {
+    if (t.status === 'done') return; // 已完成待办不再提醒
+    list.push({ kind: 'todo', item: t, startTime: t.deadline, endTime: t.deadline });
+  });
 
   list.forEach(function (entry) {
     const item = entry.item;
@@ -135,7 +144,7 @@ function checkReminders() {
       id: item.id, startTime: entry.startTime, endTime: entry.endTime,
       repeat: item.repeat, allDay: item.allDay, exceptions: item.exceptions,
     };
-    Utils.expandOccurrences(norm, { limit: 200 }).forEach(function (occ) {
+    Utils.expandOccurrences(norm, { from: now, to: now + remindBefore * 60 * 1000 + 60 * 1000 }).forEach(function (occ) {
       const remindAt = occ.startTime - remindBefore * 60 * 1000;
       if (now >= remindAt && now < occ.startTime && !data.notified[occ.key]) {
         data.notified[occ.key] = now;
@@ -146,6 +155,25 @@ function checkReminders() {
   });
 }
 
+// ---------- 四象限历史快照 ----------
+function urgentThresholdMs() {
+  const h = data && data.settings && data.settings.urgentThresholdHours;
+  return (h != null ? h : 24) * 3600 * 1000;
+}
+
+// 每日记录一次四象限分布，随时间推移累积历史趋势
+function snapshotStats() {
+  if (!data) return;
+  if (!Array.isArray(data.statsHistory)) data.statsHistory = [];
+  const today = Utils.toDateStr(Date.now());
+  const last = data.statsHistory[data.statsHistory.length - 1];
+  if (last && last.date === today) return; // 当天已快照
+  const q = Utils.calcQuadrantStats(data.todos, Date.now(), urgentThresholdMs());
+  data.statsHistory.push({ date: today, q1: q.q1, q2: q.q2, q3: q.q3, q4: q.q4, total: q.total });
+  if (data.statsHistory.length > 90) data.statsHistory = data.statsHistory.slice(-90);
+  scheduleSave();
+}
+
 // ---------- IPC ----------
 function applyImported(parsed) {
   if (!parsed || !Array.isArray(parsed.events) || !Array.isArray(parsed.todos)) {
@@ -154,7 +182,8 @@ function applyImported(parsed) {
   data.categories = Array.isArray(parsed.categories) ? parsed.categories : [];
   data.events = parsed.events;
   data.todos = parsed.todos;
-  data.settings = parsed.settings || defaultData().settings;
+  data.settings = Object.assign(defaultData().settings, parsed.settings || {});
+  data.statsHistory = Array.isArray(parsed.statsHistory) ? parsed.statsHistory : [];
   data.notified = {};
   persistData();
   return null;
@@ -162,6 +191,10 @@ function applyImported(parsed) {
 
 function registerIpc() {
   ipcMain.handle('data:load', function () { return publicData(); });
+
+  ipcMain.handle('data:statsHistory', function () {
+    return { statsHistory: data.statsHistory || [] };
+  });
 
   ipcMain.handle('data:save', function (e, payload) {
     if (payload && typeof payload === 'object') {

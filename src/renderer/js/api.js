@@ -8,6 +8,7 @@ window.API = {
   exportData: function () { return window.api.exportData(); },
   importData: function () { return window.api.importData(); },
   restoreData: function () { return window.api.restoreData(); },
+  getStatsHistory: function () { return window.api.getStatsHistory(); },
   notify: function (opts) { return window.api.notify(opts); },
   onReminder: function (cb) { window.api.onReminder(cb); },
 };

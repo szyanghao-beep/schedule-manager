@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('api', {
   exportData: function () { return ipcRenderer.invoke('data:export'); },
   importData: function () { return ipcRenderer.invoke('data:import'); },
   restoreData: function () { return ipcRenderer.invoke('data:restore'); },
+  getStatsHistory: function () { return ipcRenderer.invoke('data:statsHistory'); },
   notify: function (opts) { return ipcRenderer.invoke('notify', opts); },
   onReminder: function (cb) { ipcRenderer.on('reminder', function (e, payload) { cb(payload); }); },
 });

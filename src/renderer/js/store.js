@@ -9,7 +9,7 @@ window.Store = (function () {
     categories: [],
     events: [],
     todos: [],
-    settings: { defaultRemindBefore: 15 },
+    settings: { defaultRemindBefore: 15, urgentThresholdHours: 24 },
   };
 
   const listeners = [];

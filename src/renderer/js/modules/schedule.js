@@ -81,8 +81,20 @@ window.Modules.schedule = (function () {
   function collectItems(from, to) {
     const items = [];
     Store.get().events.forEach(function (e) {
-      Utils.expandOccurrences(e, { limit: 200 }).forEach(function (o) {
-        if (o.startTime >= from && o.startTime < to) items.push({ kind: 'event', ev: e, occ: o, startTime: o.startTime });
+      const dur = (e.endTime || e.startTime) - e.startTime;
+      // 全天事件可能跨多天：把窗口起点前移一个时长，避免实例因「起点在窗外」而被漏掉
+      const expandFrom = e.allDay ? from - dur : from;
+      Utils.expandOccurrences(e, { from: expandFrom, to: to }).forEach(function (o) {
+        if (!e.allDay) {
+          items.push({ kind: 'event', ev: e, occ: o, startTime: o.startTime });
+          return;
+        }
+        // 全天事件逐日展开，仅保留落在时间窗内的日期
+        let d = Utils.startOfDay(o.startTime);
+        while (d <= o.endTime) {
+          if (d >= from && d < to) items.push({ kind: 'event', ev: e, occ: o, startTime: d });
+          d = Utils.addDays(d, 1);
+        }
       });
     });
     // 待办提醒：未完成、有截止时间且设置了提醒（remindBefore > 0）的待办，
@@ -213,19 +225,26 @@ window.Modules.schedule = (function () {
     return row;
   }
 
+  // 待办象限配色（重要性×紧急性动态计算）
+  function todoQuadrantColor(t) {
+    const q = Utils.calcQuadrant(t, Date.now(), H.urgentThresholdMs());
+    return C.QUADRANT_COLOR[q];
+  }
+
   function todoDayItem(t, remindAt) {
     const row = el('div', 'day-item day-item-todo');
     const time = el('div', 'day-item-time', '🔔 ' + Utils.toTimeStr(remindAt));
     const main = el('div', 'item-main');
     const title = el('div', 'item-title');
     const dot = el('span', 'dot');
-    dot.style.background = t.categoryColor || '#8a8f98';
+    dot.style.background = todoQuadrantColor(t);
     title.appendChild(dot);
     title.appendChild(document.createTextNode(t.title));
     main.appendChild(title);
     main.appendChild(el('div', 'item-meta', '待办提醒 · 截止 ' + Utils.toDateTimeStr(t.deadline)));
     row.appendChild(time);
     row.appendChild(main);
+    row.appendChild(H.quadrantBadge(t));
     row.appendChild(H.badge('priority', t.priority));
     row.addEventListener('dblclick', function () { openTodoAction(t); });
     row.addEventListener('contextmenu', function (e) { e.preventDefault(); todoContextMenu(e, t); });
@@ -249,9 +268,10 @@ window.Modules.schedule = (function () {
 
   function todoChip(t, remindAt) {
     const chip = el('div', 'cal-event cal-event-todo');
-    chip.style.background = t.categoryColor || '#8a8f98';
+    const q = Utils.calcQuadrant(t, Date.now(), H.urgentThresholdMs());
+    chip.style.background = C.QUADRANT_COLOR[q];
     chip.textContent = '🔔 ' + Utils.toTimeStr(remindAt) + ' ' + t.title;
-    chip.title = '待办提醒：' + t.title + '（截止 ' + Utils.toDateTimeStr(t.deadline) + '）';
+    chip.title = '待办提醒：' + t.title + '（' + C.QUADRANT_LABEL[q] + ' · 截止 ' + Utils.toDateTimeStr(t.deadline) + '）';
     chip.addEventListener('click', function (e) { e.stopPropagation(); openTodoAction(t); });
     chip.addEventListener('contextmenu', function (e) { e.stopPropagation(); e.preventDefault(); todoContextMenu(e, t); });
     return chip;

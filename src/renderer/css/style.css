@@ -369,3 +369,17 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .chart-track { flex: 1; height: 12px; background: #eef0f3; border-radius: 6px; overflow: hidden; }
 .chart-fill { height: 100%; background: var(--primary); border-radius: 6px; }
 .chart-val { width: 44px; font-size: 13px; text-align: right; }
+
+/* ---------- 四象限分布 ---------- */
+.quad-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 8px; }
+.quad-cell { background: var(--bg); border-radius: var(--radius); padding: 14px; text-align: center; }
+.quad-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.quad-value { font-size: 24px; font-weight: 600; }
+.quad-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+/* ---------- 四象限近 30 天趋势 ---------- */
+.trend-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.trend-date { width: 44px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
+.trend-track { flex: 1; height: 14px; background: #eef0f3; border-radius: 7px; overflow: hidden; display: flex; }
+.trend-seg { height: 100%; flex-shrink: 0; }
+.trend-total { width: 28px; font-size: 12px; color: var(--muted); text-align: right; flex-shrink: 0; }

@@ -14,6 +14,8 @@
 
   var STATUS = { PENDING: 'pending', DOING: 'doing', DONE: 'done', OVERDUE: 'overdue' };
   var REPEAT_TYPE = { NONE: 'none', DAILY: 'daily', WEEKLY: 'weekly', MONTHLY: 'monthly', CUSTOM: 'custom' };
+  var IMPORTANCE = { IMPORTANT: 'important', NOT_IMPORTANT: 'not_important' };
+  var QUADRANT = { Q1: 'q1', Q2: 'q2', Q3: 'q3', Q4: 'q4' };
 
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
@@ -124,23 +126,33 @@
     return d.getTime();
   }
 
-  // 展开重复实例：返回 [{ key, startTime, endTime }]，key 用于单次编辑与提醒去重
+  // 展开重复实例：返回 [{ key, startTime, endTime }]，key 用于单次编辑与提醒去重。
+  // opts.from / opts.to 限定时间窗 [from, to)；opts.limit 为「窗内实例」处理上限（含被 exception 跳过的）。
+  // 这样很久以前开始的重复系列也能直接定位到近期实例，而不会被 limit 从起点截断。
   function expandOccurrences(item, opts) {
     opts = opts || {};
     var type = (item.repeat && item.repeat.type) || REPEAT_TYPE.NONE;
     var interval = (item.repeat && item.repeat.interval) || 1;
     var endDate = (item.repeat && item.repeat.endDate) ? startOfDay(item.repeat.endDate) : null;
-    var limit = opts.limit || 500;
+    var from = opts.from;            // 可选：跳过 startTime < from 的实例
+    var to = opts.to;                // 可选：startTime >= to 即停止
+    var limit = opts.limit || 500;   // 窗内实例处理上限（安全阀）
+    var maxIter = opts.maxIter || 100000; // 迭代次数安全阀，防止异常情况死循环
     var dur = (item.endTime || item.startTime) - item.startTime;
     var out = [];
-    var count = 0;
-    while (count < limit) {
+    var count = 0;      // 实际迭代次数
+    var produced = 0;   // 已处理的窗内实例数（含 exception 跳过的）
+    while (count < maxIter && produced < limit) {
       var start = count === 0 ? item.startTime : addRepeat(item.startTime, type, interval, count);
       if (endDate != null && startOfDay(start) > endDate) break;
-      var key = item.id + '@' + start;
-      // exceptions 记录「仅本次」被覆盖/删除的实例，展开时跳过
-      if (!(item.exceptions && item.exceptions[key])) {
-        out.push({ key: key, startTime: start, endTime: start + dur });
+      if (to != null && start >= to) break;
+      if (from == null || start >= from) {
+        produced++;
+        var key = item.id + '@' + start;
+        // exceptions 记录「仅本次」被覆盖/删除的实例，展开时跳过
+        if (!(item.exceptions && item.exceptions[key])) {
+          out.push({ key: key, startTime: start, endTime: start + dur });
+        }
       }
       count++;
       if (type === REPEAT_TYPE.NONE) break;
@@ -183,9 +195,36 @@
     };
   }
 
+  // ---- 四象限（艾森豪威尔矩阵）----
+  // 象限 = 重要性（手动）× 紧急性（由截止时间推导）。
+  // 无截止时间视为不紧急；已逾期或临近截止（now >= deadline - 阈值）视为紧急；importance 缺省视为重要。
+  function calcQuadrant(item, now, urgentThresholdMs) {
+    if (now == null) now = Date.now();
+    if (urgentThresholdMs == null) urgentThresholdMs = 24 * 3600 * 1000;
+    var important = item.importance !== IMPORTANCE.NOT_IMPORTANT;
+    var urgent = item.deadline != null && now >= item.deadline - urgentThresholdMs;
+    if (important && urgent) return QUADRANT.Q1;
+    if (important && !urgent) return QUADRANT.Q2;
+    if (!important && urgent) return QUADRANT.Q3;
+    return QUADRANT.Q4;
+  }
+
+  // 四象限分布统计（仅未完成待办）
+  function calcQuadrantStats(todos, now, urgentThresholdMs) {
+    var counts = { q1: 0, q2: 0, q3: 0, q4: 0, total: 0 };
+    (todos || []).forEach(function (t) {
+      if (t.status === 'done') return;
+      counts[calcQuadrant(t, now, urgentThresholdMs)]++;
+      counts.total++;
+    });
+    return counts;
+  }
+
   return {
     STATUS: STATUS,
     REPEAT_TYPE: REPEAT_TYPE,
+    IMPORTANCE: IMPORTANCE,
+    QUADRANT: QUADRANT,
     genId: genId,
     pad: pad,
     toDateStr: toDateStr,
@@ -202,5 +241,7 @@
     validateTodo: validateTodo,
     expandOccurrences: expandOccurrences,
     calcStats: calcStats,
+    calcQuadrant: calcQuadrant,
+    calcQuadrantStats: calcQuadrantStats,
   };
 }));

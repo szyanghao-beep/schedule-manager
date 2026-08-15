@@ -70,6 +70,23 @@ window.Helpers = (function () {
     return d.getTime();
   }
 
+  // 紧急阈值（毫秒）：截止前多少小时内视为「紧急」，可在设置中调整
+  function urgentThresholdMs() {
+    const h = Store.get().settings.urgentThresholdHours;
+    return (h != null ? h : 24) * 3600 * 1000;
+  }
+
+  // 待办四象限徽标（彩色）
+  function quadrantBadge(todo) {
+    const q = window.Utils.calcQuadrant(todo, Date.now(), urgentThresholdMs());
+    const b = el('span', 'badge');
+    b.textContent = C.QUADRANT_LABEL[q];
+    b.style.background = C.QUADRANT_COLOR[q];
+    b.style.color = '#fff';
+    b.title = '四象限：' + C.QUADRANT_LABEL[q];
+    return b;
+  }
+
   return {
     select: select,
     categorySelect: categorySelect,
@@ -77,5 +94,7 @@ window.Helpers = (function () {
     buildRepeat: buildRepeat,
     badge: badge,
     addMonths: addMonths,
+    urgentThresholdMs: urgentThresholdMs,
+    quadrantBadge: quadrantBadge,
   };
 })();

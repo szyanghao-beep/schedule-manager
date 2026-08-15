@@ -13,6 +13,7 @@ window.Modules.todo = (function () {
   let filterCategory = 'all';
   let filterPriority = 'all';
   let filterStatus = 'all';
+  let filterQuadrant = 'all';
   let selected = {}; // id -> true
 
   function render() {
@@ -46,18 +47,29 @@ window.Modules.todo = (function () {
     root.appendChild(list);
   }
 
-  // 排序：未完成在前，按截止时间升序
+  // 排序：未完成在前；其次按四象限优先级（Q1→Q4）；同象限按截止时间升序
   function filteredTodos() {
-    return Store.get().todos.filter(function (t) {
-      if (filterCategory !== 'all' && t.categoryId !== filterCategory) return false;
-      if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
-      if (filterStatus !== 'all' && window.Utils.displayStatus(t) !== filterStatus) return false;
-      return true;
-    }).sort(function (a, b) {
-      const ad = a.status === 'done', bd = b.status === 'done';
-      if (ad !== bd) return ad ? 1 : -1;
-      return (a.deadline || Number.MAX_SAFE_INTEGER) - (b.deadline || Number.MAX_SAFE_INTEGER);
-    });
+    const threshold = H.urgentThresholdMs();
+    return Store.get().todos
+      .map(function (t) {
+        return { t: t, q: window.Utils.calcQuadrant(t, Date.now(), threshold) };
+      })
+      .filter(function (x) {
+        const t = x.t;
+        if (filterCategory !== 'all' && t.categoryId !== filterCategory) return false;
+        if (filterPriority !== 'all' && t.priority !== filterPriority) return false;
+        if (filterStatus !== 'all' && window.Utils.displayStatus(t) !== filterStatus) return false;
+        if (filterQuadrant !== 'all' && x.q !== filterQuadrant) return false;
+        return true;
+      })
+      .sort(function (a, b) {
+        const ad = a.t.status === 'done', bd = b.t.status === 'done';
+        if (ad !== bd) return ad ? 1 : -1;
+        const qd = C.QUADRANT_ORDER.indexOf(a.q) - C.QUADRANT_ORDER.indexOf(b.q);
+        if (qd !== 0) return qd;
+        return (a.t.deadline || Number.MAX_SAFE_INTEGER) - (b.t.deadline || Number.MAX_SAFE_INTEGER);
+      })
+      .map(function (x) { return x.t; });
   }
 
   function filterBar() {
@@ -82,9 +94,18 @@ window.Modules.todo = (function () {
     statusSel.style.width = '120px';
     statusSel.addEventListener('change', function () { filterStatus = statusSel.value; render(); });
 
+    const quadSel = el('select');
+    quadSel.style.width = '130px';
+    [['all', '全部象限'], ['q1', 'Q1 重要紧急'], ['q2', 'Q2 重要不紧急'], ['q3', 'Q3 紧急不重要'], ['q4', 'Q4 不重要不紧急']].forEach(function (pair) {
+      const o = el('option'); o.value = pair[0]; o.textContent = pair[1]; quadSel.appendChild(o);
+    });
+    quadSel.value = filterQuadrant;
+    quadSel.addEventListener('change', function () { filterQuadrant = quadSel.value; render(); });
+
     bar.appendChild(catSel);
     bar.appendChild(prioSel);
     bar.appendChild(statusSel);
+    bar.appendChild(quadSel);
     return bar;
   }
 
@@ -146,6 +167,7 @@ window.Modules.todo = (function () {
     });
 
     const side = el('div', 'item-side');
+    side.appendChild(H.quadrantBadge(t));
     side.appendChild(H.badge('priority', t.priority));
     side.appendChild(H.badge('status', status));
 
@@ -240,6 +262,13 @@ window.Modules.todo = (function () {
     catRow.appendChild(catSelect);
     body.appendChild(catRow);
 
+    const importanceRow = el('div', 'form-row');
+    importanceRow.appendChild(el('label', null, '四象限重要性'));
+    const importanceSelect = H.select(['important', 'not_important'], C.IMPORTANCE_LABEL, (t && t.importance === 'not_important') ? 'not_important' : 'important');
+    importanceSelect.dataset.field = 'importance';
+    importanceRow.appendChild(importanceSelect);
+    body.appendChild(importanceRow);
+
     const rr = el('div', 'form-grid');
     const repeatRow = el('div', 'form-row');
     repeatRow.appendChild(el('label', null, '重复'));
@@ -294,15 +323,16 @@ window.Modules.todo = (function () {
           deadline: d.deadlineDate ? window.Utils.parseDateTime(d.deadlineDate, d.deadlineTime || '23:59') : null,
           priority: d.priority,
           categoryId: d.categoryId,
+          importance: d.importance || 'important',
           repeat: H.buildRepeat(d),
           remindBefore: Number(d.remindBefore),
         };
         const v = window.Utils.validateTodo(input);
         if (!v.ok) { window.Toast.error(v.errors[0]); return false; }
+        const cat = H.categoryOf(d.categoryId);
         if (t) {
-          Store.updateTodo(t.id, Object.assign(input, { updatedAt: Date.now() }));
+          Store.updateTodo(t.id, Object.assign(input, { categoryName: cat.name, categoryColor: cat.color, updatedAt: Date.now() }));
         } else {
-          const cat = H.categoryOf(d.categoryId);
           Store.addTodo(Object.assign({
             id: window.Utils.genId(), status: 'pending', completedAt: null, createdAt: Date.now(), updatedAt: Date.now(),
           }, input, { categoryName: cat.name, categoryColor: cat.color }));
