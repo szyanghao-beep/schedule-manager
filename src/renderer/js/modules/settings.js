@@ -49,6 +49,29 @@ window.Modules.settings = (function () {
     remindCard.appendChild(remindRow);
     root.appendChild(remindCard);
 
+    // 外观主题
+    const themeCard = el('div', 'card');
+    themeCard.style.marginTop = '16px';
+    themeCard.appendChild(el('div', 'panel-title', '外观'));
+    const themeRow = el('div', 'form-row');
+    themeRow.style.marginTop = '12px';
+    themeRow.appendChild(el('label', null, '界面主题'));
+    const themeSel = el('select');
+    [['system', '跟随系统'], ['light', '浅色'], ['dark', '深色']].forEach(function (pair) {
+      const opt = el('option');
+      opt.value = pair[0];
+      opt.textContent = pair[1];
+      themeSel.appendChild(opt);
+    });
+    themeSel.value = Store.get().settings.theme || 'system';
+    themeSel.addEventListener('change', function () {
+      Store.set({ settings: Object.assign({}, Store.get().settings, { theme: themeSel.value }) });
+      window.Toast.success('已保存');
+    });
+    themeRow.appendChild(themeSel);
+    themeCard.appendChild(themeRow);
+    root.appendChild(themeCard);
+
     // 时间管理四象限
     const quadCard = el('div', 'card');
     quadCard.style.marginTop = '16px';

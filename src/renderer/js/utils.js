@@ -220,6 +220,98 @@
     return counts;
   }
 
+  // ---- 穿透明细（统计页下钻）----
+  // 按 type 收集底层条目，口径与 calcStats / calcQuadrantStats 严格一致：
+  //   today/week/month -> 时间窗内（事件按 startTime，待办按 deadline）
+  //   overdue          -> displayStatus === overdue
+  //   completed        -> status === done
+  //   q1..q4           -> 未完成且 calcQuadrant === type 的待办
+  // 返回 [{ kind: 'event'|'todo', item }]，已排序。
+  function calcDrillItems(events, todos, type, now, urgentThresholdMs) {
+    if (now == null) now = Date.now();
+    if (urgentThresholdMs == null) urgentThresholdMs = 24 * 3600 * 1000;
+    var out = [];
+
+    (events || []).forEach(function (e) {
+      if (type === 'overdue') {
+        if (displayStatus(e, now) === STATUS.OVERDUE) out.push({ kind: 'event', item: e, time: e.startTime });
+      } else if (type === 'completed') {
+        if (e.status === STATUS.DONE) out.push({ kind: 'event', item: e, time: e.startTime });
+      } else if (type === 'today' || type === 'week' || type === 'month') {
+        if (e.startTime != null && inRange(e.startTime, type, now)) out.push({ kind: 'event', item: e, time: e.startTime });
+      }
+    });
+
+    (todos || []).forEach(function (t) {
+      if (type === 'overdue') {
+        if (displayStatus(t, now) === STATUS.OVERDUE) out.push({ kind: 'todo', item: t, time: t.deadline });
+      } else if (type === 'completed') {
+        if (t.status === STATUS.DONE) out.push({ kind: 'todo', item: t, time: t.deadline });
+      } else if (type === 'q1' || type === 'q2' || type === 'q3' || type === 'q4') {
+        if (t.status !== STATUS.DONE && calcQuadrant(t, now, urgentThresholdMs) === type) out.push({ kind: 'todo', item: t, time: t.deadline });
+      } else if (type === 'today' || type === 'week' || type === 'month') {
+        if (t.deadline != null && inRange(t.deadline, type, now)) out.push({ kind: 'todo', item: t, time: t.deadline });
+      }
+    });
+
+    out.sort(function (a, b) {
+      if (type === 'completed' || type === 'overdue') return (b.time || 0) - (a.time || 0);
+      if (type === 'today' || type === 'week' || type === 'month') {
+        var ad = a.item.status === STATUS.DONE, bd = b.item.status === STATUS.DONE;
+        if (ad !== bd) return ad ? 1 : -1; // 未完成在前
+      }
+      return (a.time || Number.MAX_SAFE_INTEGER) - (b.time || Number.MAX_SAFE_INTEGER);
+    });
+
+    return out.map(function (x) { return { kind: x.kind, item: x.item }; });
+  }
+
+  // 时间窗判断：[start, end)，与 calcStats 的 bucket 口径一致
+  function inRange(ts, type, now) {
+    var day = startOfDay(now);
+    if (type === 'today') return ts >= day && ts < addDays(day, 1);
+    var week = startOfWeek(now);
+    if (type === 'week') return ts >= week && ts < addDays(week, 7);
+    var monthStart = startOfMonth(now);
+    var d = new Date(monthStart);
+    var nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1).getTime();
+    return ts >= monthStart && ts < nextMonth;
+  }
+
+  // ---- 搜索 ----
+  // 全文搜索日程与待办：匹配标题 / 描述 / 分类名，多关键词 AND、大小写不敏感。
+  // 返回 { events, todos }，各自按时间升序（无时间的排最后）；空查询返回空结果。
+  // 不修改入参数组（filter 产生新数组后排序）。
+  function searchItems(query, events, todos) {
+    var out = { events: [], todos: [] };
+    var q = String(query == null ? '' : query).trim().toLowerCase();
+    if (!q) return out;
+    var terms = q.split(/\s+/).filter(function (t) { return t.length > 0; });
+    if (!terms.length) return out;
+
+    function matches(item) {
+      var hay = [item.title, item.description, item.categoryName]
+        .filter(function (x) { return x != null; })
+        .join('\n')
+        .toLowerCase();
+      return terms.every(function (t) { return hay.indexOf(t) !== -1; });
+    }
+
+    function byTimeAsc(a, b, key) {
+      var ta = a[key], tb = b[key];
+      if (ta == null && tb == null) return 0;
+      if (ta == null) return 1;
+      if (tb == null) return -1;
+      return ta - tb;
+    }
+
+    (events || []).filter(matches).sort(function (a, b) { return byTimeAsc(a, b, 'startTime'); })
+      .forEach(function (e) { out.events.push(e); });
+    (todos || []).filter(matches).sort(function (a, b) { return byTimeAsc(a, b, 'deadline'); })
+      .forEach(function (t) { out.todos.push(t); });
+    return out;
+  }
+
   return {
     STATUS: STATUS,
     REPEAT_TYPE: REPEAT_TYPE,
@@ -243,5 +335,7 @@
     calcStats: calcStats,
     calcQuadrant: calcQuadrant,
     calcQuadrantStats: calcQuadrantStats,
+    calcDrillItems: calcDrillItems,
+    searchItems: searchItems,
   };
 }));

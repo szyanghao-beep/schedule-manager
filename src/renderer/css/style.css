@@ -1,6 +1,7 @@
 /* style.css — 极简风格样式（无动画、无花哨元素，专注功能性） */
 
 :root {
+  color-scheme: light;
   --bg: #f5f6f8;
   --surface: #ffffff;
   --border: #e4e6ea;
@@ -13,6 +14,51 @@
   --warning: #f2a541;
   --radius: 8px;
 }
+
+/* ---------- 深色模式 ---------- */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --bg: #17191d;
+  --surface: #202329;
+  --border: #2e3239;
+  --text: #e6e8eb;
+  --muted: #9aa0a8;
+  --primary: #5d9bff;
+  --primary-hover: #4a86e8;
+}
+:root[data-theme='dark'] .nav-item:hover,
+:root[data-theme='dark'] .btn:hover,
+:root[data-theme='dark'] .context-menu-item:hover { background: #2a2e35; }
+:root[data-theme='dark'] .nav-item.active { background: rgba(93, 155, 255, 0.16); }
+:root[data-theme='dark'] .cal-weekdays,
+:root[data-theme='dark'] .cal-cell:hover,
+:root[data-theme='dark'] .cal-cell.other { background: #1b1e23; }
+:root[data-theme='dark'] .cal-cell.today,
+:root[data-theme='dark'] .week-col.today { background: rgba(93, 155, 255, 0.14); }
+:root[data-theme='dark'] .item:hover { border-color: #3a3f47; }
+:root[data-theme='dark'] .chart-track { background: #2e3239; }
+:root[data-theme='dark'] .chart-row-clickable:hover .chart-track { background: #383d45; }
+:root[data-theme='dark'] .stat-card-clickable:hover { background: rgba(93, 155, 255, 0.08); }
+:root[data-theme='dark'] .quad-cell-clickable:hover { background: #262a31; }
+:root[data-theme='dark'] .cal-event.more { background: #2e3239; }
+:root[data-theme='dark'] .badge-pending,
+:root[data-theme='dark'] .badge-low { background: rgba(255, 255, 255, 0.09); color: #c3c9d1; }
+:root[data-theme='dark'] .badge-doing { background: rgba(93, 155, 255, 0.18); color: #7db0ff; }
+:root[data-theme='dark'] .badge-done { background: rgba(76, 175, 125, 0.18); color: #6cc598; }
+:root[data-theme='dark'] .badge-overdue,
+:root[data-theme='dark'] .badge-high { background: rgba(224, 91, 91, 0.18); color: #f07b7b; }
+:root[data-theme='dark'] .badge-medium { background: rgba(242, 165, 65, 0.18); color: #f5b95c; }
+:root[data-theme='dark'] .btn-danger { border-color: rgba(224, 91, 91, 0.4); }
+:root[data-theme='dark'] .btn-danger:hover { background: rgba(224, 91, 91, 0.15); }
+:root[data-theme='dark'] .trend-gridline { stroke: #2e3239; }
+:root[data-theme='dark'] .trend-crosshair { stroke: #4a4f58; }
+:root[data-theme='dark'] .trend-axis-label { fill: #9aa0a8; }
+:root[data-theme='dark'] .trend-legend-item { color: #b7bcc4; }
+:root[data-theme='dark'] .trend-table-row { border-bottom-color: #2e3239; }
+:root[data-theme='dark'] .trend-table-head { color: #9aa0a8; border-bottom-color: #2e3239; }
+:root[data-theme='dark'] .trend-table-date { color: #9aa0a8; }
+:root[data-theme='dark'] .trend-tooltip { background: #2b2f36; }
+:root[data-theme='dark'] .modal-overlay { background: rgba(0, 0, 0, 0.55); }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -273,6 +319,22 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .context-menu-item.danger { color: var(--danger); }
 .context-menu-sep { height: 1px; background: var(--border); margin: 4px 6px; }
 
+/* ---------- 搜索 ---------- */
+.search-box { margin: 12px 0 4px; }
+.search-box input { padding: 10px 14px; font-size: 14px; }
+.search-group-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 14px 0 6px;
+}
+.search-hl {
+  background: rgba(242, 165, 65, 0.35);
+  color: inherit;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
 /* ---------- 日历 ---------- */
 .cal-toolbar {
   display: flex;
@@ -377,9 +439,53 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .quad-value { font-size: 24px; font-weight: 600; }
 .quad-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
 
-/* ---------- 四象限近 30 天趋势 ---------- */
-.trend-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.trend-date { width: 44px; font-size: 12px; color: var(--muted); flex-shrink: 0; }
-.trend-track { flex: 1; height: 14px; background: #eef0f3; border-radius: 7px; overflow: hidden; display: flex; }
-.trend-seg { height: 100%; flex-shrink: 0; }
-.trend-total { width: 28px; font-size: 12px; color: var(--muted); text-align: right; flex-shrink: 0; }
+/* ---------- 统计穿透（可点击） ---------- */
+.stat-card-clickable, .quad-cell-clickable, .chart-row-clickable { cursor: pointer; }
+.stat-card-clickable:hover { border-color: var(--primary); background: #f7faff; }
+.quad-cell-clickable:hover { background: #eef2f8; }
+.chart-row-clickable:hover .chart-track { background: #e4e9f0; }
+
+/* ---------- 趋势堆叠面积图 / 明细表 ---------- */
+.trend-svg { width: 100%; height: auto; display: block; }
+.trend-chart-wrap { position: relative; margin-top: 8px; }
+.trend-gridline { stroke: #eef0f3; stroke-width: 1; }
+.trend-axis-label { fill: #8a8f98; font-size: 11px; }
+.trend-area { opacity: 0.16; }
+.trend-line { stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.trend-crosshair { stroke: #c3c8d0; stroke-width: 1; stroke-dasharray: 3 3; }
+.trend-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; }
+.trend-legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5c626d; }
+.trend-legend-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+.trend-tooltip {
+  position: absolute;
+  background: #333a45;
+  color: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 150px;
+}
+.trend-tip-date { font-weight: 600; margin-bottom: 6px; }
+.trend-tip-row { display: flex; align-items: center; gap: 6px; line-height: 1.7; }
+.trend-tip-swatch { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.trend-tip-label { flex: 1; color: #d7dbe0; }
+.trend-tip-value { font-weight: 600; }
+
+.trend-table { margin-top: 8px; display: flex; flex-direction: column; }
+.trend-table-row {
+  display: grid;
+  grid-template-columns: 60px repeat(4, 1fr) 52px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 12px;
+}
+.trend-table-head { font-weight: 600; color: #8a8f98; border-bottom: 1px solid #e4e6ea; }
+.trend-table-date { color: #8a8f98; }
+.trend-table-cell { text-align: right; }
+.trend-table-head .trend-table-date { text-align: left; }
+.trend-table-head .trend-table-cell { font-weight: 600; }

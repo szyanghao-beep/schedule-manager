@@ -9,7 +9,7 @@ window.Store = (function () {
     categories: [],
     events: [],
     todos: [],
-    settings: { defaultRemindBefore: 15, urgentThresholdHours: 24 },
+    settings: { defaultRemindBefore: 15, urgentThresholdHours: 24, theme: 'system' },
   };
 
   const listeners = [];

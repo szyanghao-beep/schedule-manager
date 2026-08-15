@@ -76,6 +76,13 @@ window.Modules.schedule = (function () {
     render();
   }
 
+  // 跳转到指定日期（日视图），供统计页穿透「定位」使用
+  function goto(ts) {
+    anchor = Utils.startOfDay(ts || Date.now());
+    viewMode = 'day';
+    render();
+  }
+
   // ---------- 数据收集 ----------
   // 收集 [from, to) 内的日程实例与待办提醒，统一按时间排序
   function collectItems(from, to) {
@@ -576,5 +583,5 @@ window.Modules.schedule = (function () {
     Store.updateEvent(ev.id, base);
   }
 
-  return { render: render };
+  return { render: render, goto: goto };
 })();

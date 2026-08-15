@@ -1,7 +1,7 @@
 {
   "name": "schedule-manager",
   "productName": "日程管理",
-  "version": "1.1.0",
+  "version": "1.2.1",
   "description": "轻量化、极简风格的日程任务管理工具",
   "main": "main.js",
   "author": "hao.yang",
@@ -27,12 +27,17 @@
       "main.js",
       "preload.js",
       "src/**/*",
+      "build/icon.png",
       "package.json"
     ],
     "mac": {
       "target": [
         "dmg",
         "zip"
+      ],
+      "arch": [
+        "x64",
+        "arm64"
       ],
       "category": "public.app-category.productivity"
     },
