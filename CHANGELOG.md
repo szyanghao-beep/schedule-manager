@@ -24,6 +24,7 @@
 - **渲染进程崩溃兜底**：监听 `render-process-gone`，崩溃 / OOM 时自动重建窗口并弹系统通知，带 10s 防崩溃循环保护；数据保存在主进程内存并已防抖落盘，崩溃不丢数据。
 - **数据 schema 版本化**：`data.json` 顶层新增 `version` 字段，新增 `src/shared/migrate.js` 迁移框架（无 version 的历史数据视为 v1），启动加载与导入 / 恢复旧备份时自动迁移；v1→v2 迁移正式化早期 settings 深合并修复并防御顶层数组缺失。
 - **CI 测试门禁**：GitHub Actions 新增 `test` 作业（ubuntu + `npm test`），mac / win 构建依赖其通过，测试失败不再浪费打包时间。
+- **修复 mac 打包配置**：electron-builder 26 中 `arch` 已从 `mac` 顶层移除（`MacConfiguration` 无此属性），改为 `mac.target` 条目内的 `TargetConfiguration.arch`；原 `mac.arch` 写法导致 `dist:mac` schema 校验失败，双架构（x64 + arm64）已按新格式配置。
 
 **体验升级**
 - **全文搜索**：新增「搜索」视图（导航 + `Ctrl+F` / `Cmd+F` 唤起），检索日程与待办的标题 / 描述 / 分类名，多关键词 AND、大小写不敏感；结果按时间排序并高亮命中词，日程可一键定位到日视图，待办可直接勾选完成 / 编辑；匹配逻辑 `utils.searchItems` 为纯函数，`test/search.test.js` 覆盖 9 类用例。
