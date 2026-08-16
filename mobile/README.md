@@ -60,21 +60,11 @@ mobile/
 
 ## 四、安装运行步骤
 
-### 1. 生成原生 android/ 工程（仅首次，约几分钟）
+### 1. 原生 android/ 工程（已随仓库提交，无需再生成）
 
-RN 项目的原生 `android/`（Gradle 工程）不随本仓库提交，需要先用官方模板生成一次：
-
-```bat
-cd E:\DSH\日程管理工具
-:: 项目名必须为 ScheduleMobile，与 app.json 的 name、index.js 注册名保持一致
-npx @react-native-community/cli@latest init ScheduleMobile --version 0.74.5
-:: 把生成的原生工程复制进 mobile/（只需 android/；ios/ 可留作以后用）
-xcopy /E /I ScheduleMobile\android mobile\android
-:: 删除临时工程
-rmdir /S /Q ScheduleMobile
-```
-
-如果你已有现成的 RN 工程 `android/` 目录（react-native 0.74.x），直接拷入 `mobile/` 即可。
+`mobile/android/` 完整的 Gradle 原生工程**已随仓库提交**（含 `debug.keystore`），
+app 名统一为「日程管理」，`AndroidManifest.xml` 已加 `usesCleartextTraffic="true"`。
+无需再 `init` 生成，直接安装依赖后即可构建。
 
 ### 2. 安装依赖
 
@@ -83,7 +73,23 @@ cd E:\DSH\日程管理工具\mobile
 npm install
 ```
 
-### 3. 配置服务器地址
+### 3. 构建 / 安装 APK
+
+**方式 A：CI 自动构建（推荐，无需本地 Android 环境）**
+
+仓库的 `.github/workflows/build-apk.yml` 会在 mobile/ 或 shared/ 变更时自动构建
+**release APK**（JS bundle 已打包，装手机即可独立运行，无需 Metro）：
+Actions → `build-apk` → 下载 artifact `日程管理-安卓端-release` → 解压得 `app-release.apk`。
+
+**方式 B：本地构建（需 Android SDK + JDK 17）**
+
+```bat
+cd E:\DSH\日程管理工具\mobile\android
+gradlew assembleRelease
+:: 产物在 app/build/outputs/apk/release/app-release.apk
+```
+
+### 4. 配置服务器地址
 
 在 App 登录页填写服务器地址：
 
