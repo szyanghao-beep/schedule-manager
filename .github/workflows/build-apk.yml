@@ -1,6 +1,6 @@
 name: build-apk
 
-# 构建安卓端 debug APK（可直接安装，无需签名），产物作为 artifact 下载。
+# 构建安卓端 release APK（JS bundle 已打包，独立安装运行、无需 Metro），产物作为 artifact 下载。
 # 触发：手动（workflow_dispatch）或 mobile/、shared/ 变更。
 on:
   workflow_dispatch:
@@ -30,15 +30,15 @@ jobs:
           cd mobile
           npm install
 
-      - name: 构建 debug APK
+      - name: 构建 release APK
         run: |
           cd mobile/android
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: 日程管理-安卓端-debug
-          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          name: 日程管理-安卓端-release
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
