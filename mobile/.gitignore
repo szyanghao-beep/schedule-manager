@@ -6,6 +6,7 @@ android/build/
 android/local.properties
 android/.idea/
 *.keystore
+!debug.keystore
 *.log
 .DS_Store
 npm-debug.log*
