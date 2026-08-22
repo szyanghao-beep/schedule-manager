@@ -26,11 +26,18 @@ function createDb(dbPath) {
       entity_id TEXT NOT NULL,
       deleted INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL,
+      client_updated_at INTEGER NOT NULL DEFAULT 0,
       data_json TEXT NOT NULL,
       PRIMARY KEY (user_id, entity_type, entity_id)
     );
     CREATE INDEX IF NOT EXISTS idx_records_user_time ON records(user_id, updated_at);
   `);
+  // 迁移：旧库的 records 表无 client_updated_at 列（LWW 仲裁改为客户端时间后新增），补列。
+  const cols = db.prepare("PRAGMA table_info(records)").all();
+  const hasClientUpdatedAt = cols.some(function (c) { return c.name === 'client_updated_at'; });
+  if (!hasClientUpdatedAt) {
+    db.exec('ALTER TABLE records ADD COLUMN client_updated_at INTEGER NOT NULL DEFAULT 0');
+  }
   return db;
 }
 

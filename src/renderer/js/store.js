@@ -77,8 +77,10 @@ window.Store = (function () {
 
   function touch(rec) {
     const now = Date.now();
-    rec.updatedAt = now;        // LWW 比较用（推给服务端后被服务端时间仲裁覆盖）
-    rec.localModifiedAt = now;  // 本地修改追踪（推送增量提取用，客户端时间轴）
+    // updatedAt 取「当前时间」与「记录已有时间 + 1」的较大者，保证同一条记录时间戳单调递增，
+    // 避免本地时钟回拨时新编辑被服务端 LWW 误判为「旧编辑」而拒绝。
+    rec.updatedAt = Math.max(now, (rec.updatedAt || 0) + 1);
+    rec.localModifiedAt = now;  // 本地修改追踪（推送增量提取用，客户端墙钟时间轴）
   }
 
   // ---- 分类 ----

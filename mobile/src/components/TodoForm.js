@@ -27,7 +27,7 @@ import ChipGroup from './ChipGroup';
 import CategoryPicker from './CategoryPicker';
 
 const { utils, constants } = shared;
-const { PRIORITY, PRIORITY_LABEL, IMPORTANCE, IMPORTANCE_LABEL, REPEAT_TYPE, REPEAT_LABEL, REMIND_OPTIONS } = constants;
+const { PRIORITY, PRIORITY_LABEL, IMPORTANCE, IMPORTANCE_LABEL, REPEAT_TYPE, REPEAT_LABEL, REMIND_OPTIONS, ESTIMATED_MINUTES_OPTIONS } = constants;
 
 const REPEAT_OPTIONS = [
   { value: REPEAT_TYPE.NONE, label: REPEAT_LABEL.none },
@@ -48,6 +48,10 @@ const REMIND_OPTIONS_CHIPS = REMIND_OPTIONS.map((m) => ({
   value: m,
   label: m === 0 ? '不提醒' : m + ' 分钟',
 }));
+const ESTIMATED_OPTIONS = [
+  { value: null, label: '不设定' },
+  ...ESTIMATED_MINUTES_OPTIONS.map((m) => ({ value: m, label: m + ' 分钟' })),
+];
 
 export default function TodoForm() {
   const navigation = useNavigation();
@@ -76,6 +80,9 @@ export default function TodoForm() {
   const [priority, setPriority] = useState(editing ? editing.priority || PRIORITY.MEDIUM : PRIORITY.MEDIUM);
   const [importance, setImportance] = useState(
     editing ? editing.importance || IMPORTANCE.IMPORTANT : IMPORTANCE.IMPORTANT
+  );
+  const [estimatedMinutes, setEstimatedMinutes] = useState(
+    editing ? editing.estimatedMinutes || null : null
   );
   const [repeatType, setRepeatType] = useState(
     editing && editing.repeat ? editing.repeat.type || REPEAT_TYPE.NONE : REPEAT_TYPE.NONE
@@ -145,6 +152,7 @@ export default function TodoForm() {
       categoryColor: category.color,
       repeat: { type: repeatType, interval: isNaN(interval) || interval < 1 ? 1 : interval, endDate },
       remindBefore,
+      estimatedMinutes,
     };
 
     const v = utils.validateTodo(input);
@@ -222,6 +230,9 @@ export default function TodoForm() {
 
         <Text style={styles.label}>重要性（四象限）</Text>
         <ChipGroup options={IMPORTANCE_OPTIONS} value={importance} onChange={setImportance} />
+
+        <Text style={styles.label}>预估耗时（时间块）</Text>
+        <ChipGroup options={ESTIMATED_OPTIONS} value={estimatedMinutes} onChange={setEstimatedMinutes} />
 
         <Text style={styles.label}>分类</Text>
         <CategoryPicker

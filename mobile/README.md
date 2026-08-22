@@ -13,7 +13,9 @@
 - 待办页：列表 + 完成勾选 + 四象限彩色徽标（`calcQuadrant`）+ 新增/编辑/删除
 - 同步：登录后首次全量拉取；每次增删改自动推送（防抖 800ms）；「我的」页手动「立即同步」；
   本地用 AsyncStorage 持久化 `{token, serverUrl, user, lastSyncAt, journal, records}`
-- 提醒：仅保存 `remindBefore` 字段（界面占位），未接本地通知（MVP 不强求）
+- 待办：支持「预估耗时」字段（15/30/45/60/90/120/180/240 分钟，`estimatedMinutes`），与桌面端同步
+- 提醒：`@notifee/react-native` 本地通知——依据待办 deadline 与日程 startTime 的 `remindBefore`
+  重排未来 7 天提醒；请求通知权限（Android 13+ `POST_NOTIFICATIONS`），数据变更防抖重排、退出登录自动清空
 
 ---
 
@@ -32,6 +34,7 @@ mobile/
     ├── api.js            # 后端 REST 客户端（fetch，登录/注册/拉取/推送）
     ├── store.js          # 本地数据层：记录 Map + journal + AsyncStorage 持久化
     ├── syncClient.js     # 同步编排：推/拉/合并（复用 shared/sync）+ 状态订阅
+    ├── notifications.js  # 本地通知（@notifee）：权限请求 + remindBefore 重排未来 7 天提醒
     ├── formats.js        # 日期时间文本输入/展示辅助
     ├── screens/
     │   ├── LoginScreen.js   # 登录/注册（可填服务器地址）
@@ -97,7 +100,7 @@ gradlew assembleRelease
 - **安卓模拟器**：`http://10.0.2.2:8787`（模拟器访问宿主机的专用地址）
 - **USB 调试**：`adb reverse tcp:8787 tcp:8787` 后可用 `http://127.0.0.1:8787`
 
-### 4. 允许明文 HTTP（开发期必须，否则请求会报 CLEARTEXT 错误）
+### 5. 允许明文 HTTP（开发期必须，否则请求会报 CLEARTEXT 错误）
 
 Android 9+ 默认禁止 http 明文。编辑 `mobile/android/app/src/main/AndroidManifest.xml`，
 在 `<application ...>` 标签上增加：
@@ -108,7 +111,7 @@ android:usesCleartextTraffic="true"
 
 > 仅开发期使用；生产环境应改用 https。
 
-### 5. 运行
+### 6. 运行
 
 ```bat
 cd E:\DSH\日程管理工具\mobile
@@ -132,6 +135,7 @@ npm run android
 | react-native-screens | ~3.31.1 | native-stack/bottom-tabs 依赖 |
 | react-native-safe-area-context | ^4.10.5 | 安全区 |
 | @react-native-async-storage/async-storage | ^1.24.0 | 本地持久化 |
+| @notifee/react-native | ^7.8.2 | 本地通知（remindBefore 提醒） |
 | @react-native/metro-config / @react-native/babel-preset / @babel/core | ^0.74.5 / ^0.74.5 / ^7.24 | 构建（dev） |
 
 > 日期时间采用「文本输入 + 校验」实现（YYYY-MM-DD / HH:mm），未引入
@@ -182,9 +186,9 @@ module.exports = require('./shared/index.js');
 
 ## 七、同步机制说明
 
-- **记录级增量 + LWW + 服务端时间仲裁**：每条记录带 `{id, entityType, deleted, updatedAt, data}`；
-  冲突时 `updatedAt` 新者胜，相等时墓碑（deleted）优先；服务端合并前会把
-  `updatedAt` 重写为服务器时间。
+- **记录级增量 + LWW（按客户端编辑时间）+ 服务端时间戳游标**：每条记录带 `{id, entityType, deleted, updatedAt, data}`；
+  冲突时 `updatedAt` 新者胜，相等时墓碑（deleted）优先；服务端按客户端声明的编辑时间仲裁，
+  另盖单调递增时间戳仅作增量拉取游标（职责分离，避免旧数据晚到覆盖新数据）。
 - **本地变更（journal）**：每次增删改生成一条 change 进 journal（同 key 旧条目自动作废），
   合并进本地 Map 并持久化；随后自动防抖推送（800ms）。
 - **推送**：POST `/api/sync` 发送 journal；成功后 `updatedAt <= serverTime` 的条目出队，
@@ -200,8 +204,10 @@ module.exports = require('./shared/index.js');
 
 - 重复日程「单次编辑」= 编辑整个系列；删除支持「仅删除本次」（写入
   `exceptions[occurrenceKey]=true`，被 `expandOccurrences` 跳过）。
-- 未接入本地通知（@notifee/react-native 等），`remindBefore` 仅作字段保存。
-- 分类 / 设置（settings）只在电脑端维护，手机端只读使用（列表/象限阈值会自动跟随同步结果）。
+- 本地通知已接入 `@notifee/react-native`（`src/notifications.js`）；需要 `npm install` 后重新构建 APK 生效，
+  首次启动会请求通知权限（Android 13+）。原生模块未正确链接时通知模块会防御式降级 no-op，不影响其它功能。
+- 分类 / 设置（settings）主要在电脑端维护；其中 `urgentThresholdHours`（紧急阈值）与 `defaultRemindBefore`
+  （默认提醒）随同步下发，手机端象限阈值会自动跟随，其余偏好（如 `theme`）各端独立。
 - 仅支持 Android。
 - LWW 对设备时钟偏差敏感：服务端时间仲裁可缓解，但本地时钟严重超前时可能反复推送同一变更
   （幂等无害，时钟校准后自愈）。

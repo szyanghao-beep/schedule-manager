@@ -15,11 +15,14 @@ contextBridge.exposeInMainWorld('api', {
   getStatsHistory: function () { return ipcRenderer.invoke('data:statsHistory'); },
   notify: function (opts) { return ipcRenderer.invoke('notify', opts); },
   onReminder: function (cb) { ipcRenderer.on('reminder', function (e, payload) { cb(payload); }); },
+  onQuickCapture: function (cb) { ipcRenderer.on('quick-capture', function () { cb(); }); },
   // 同步
   loginSync: function (opts) { return ipcRenderer.invoke('sync:login', opts); },
   syncPull: function () { return ipcRenderer.invoke('sync:pull'); },
   syncPush: function () { return ipcRenderer.invoke('sync:push'); },
+  syncNow: function () { return ipcRenderer.invoke('sync:now'); },
   syncStatus: function () { return ipcRenderer.invoke('sync:status'); },
   syncLogout: function () { return ipcRenderer.invoke('sync:logout'); },
   onSyncDataUpdated: function (cb) { ipcRenderer.on('sync-data-updated', function () { cb(); }); },
+  onSyncConflict: function (cb) { ipcRenderer.on('sync-conflicts', function (e, payload) { cb(payload); }); },
 });

@@ -6,8 +6,9 @@
  *   2. 同步以「记录级增量」进行，不做整文件覆盖。
  *   3. 冲突解决用 LWW（Last-Write-Wins）：updatedAt 新者胜；
  *      时间相同则「已删除(墓碑)」优先，避免已删记录被旧副本复活。
- *   4. 服务端时间仲裁：服务端在合并前把 change.updatedAt 重写为服务器时间，
- *      避免设备本地时钟不准导致 LWW 失效（见 server 端实现）。
+ *   4. 服务端仲裁：LWW 按客户端声明的编辑时间（updatedAt）判定，服务端另盖
+ *      单调递增的 updated_at 仅作增量拉取游标，二者职责分离（见 server 端实现）。
+ *      客户端时间轴只用于推送判定（localModifiedAt），不与服务端时间混用。
  *
  * 纯函数、无副作用，Node(CommonJS) 直接 require，可单测。
  */
@@ -41,12 +42,16 @@ function lww(a, b) {
 
 // 记录 -> 变更对象（change）
 function toChange(rec, entityType) {
+  const data = Object.assign({}, rec);
+  // localModifiedAt 是「客户端内部」追踪字段，不参与同步：
+  // 若随 data 上传，会被别的设备拉取后误判为「本地修改」而反复重推。
+  delete data.localModifiedAt;
   return {
     entityType: entityType,
     id: rec.id,
     deleted: !!rec.deleted,
     updatedAt: recordTime(rec),
-    data: rec,
+    data: data,
   };
 }
 

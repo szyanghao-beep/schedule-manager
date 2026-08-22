@@ -180,15 +180,17 @@ function _create(entityType, fields) {
 function _update(entityType, id, patch) {
   const old = getById(entityType, id);
   if (!old) return null;
-  const rec = Object.assign({}, old, patch, { updatedAt: Date.now() });
+  // updatedAt 单调递增，避免本地时钟回拨导致新编辑被服务端 LWW 误判为旧编辑
+  const rec = Object.assign({}, old, patch, { updatedAt: Math.max(Date.now(), (old.updatedAt || 0) + 1) });
   _mutate(entityType, rec);
   return rec;
 }
 
 // 软删除：写入 deleted 墓碑（LWW 语义下墓碑优先，防止旧副本复活）
 function _remove(entityType, id) {
-  if (!getById(entityType, id)) return;
-  _mutate(entityType, { id, deleted: true, updatedAt: Date.now() });
+  const old = getById(entityType, id);
+  if (!old) return;
+  _mutate(entityType, { id, deleted: true, updatedAt: Math.max(Date.now(), (old.updatedAt || 0) + 1) });
 }
 
 // ---------------- 日程 ----------------

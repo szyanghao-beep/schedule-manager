@@ -265,9 +265,9 @@ window.Modules.settings = (function () {
 
   async function doSync() {
     try {
-      const pull = await window.API.syncPull();
-      const push = await window.API.syncPush();
-      window.Toast.success('同步完成：拉取 ' + pull.pulled + ' 条，推送 ' + push.pushed + ' 条');
+      // 统一走 push-then-pull（先推本地修改，再拉其他设备变更）
+      const res = await window.API.syncNow();
+      window.Toast.success('同步完成：推送 ' + res.pushed + ' 条，拉取 ' + res.pulled + ' 条');
     } catch (e) {
       window.Toast.error('同步失败：' + (e.message || e));
     }

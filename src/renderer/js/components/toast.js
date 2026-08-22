@@ -19,5 +19,6 @@ window.Toast = (function () {
     info: function (m) { show(m); },
     success: function (m) { show(m, 'success'); },
     error: function (m) { show(m, 'error'); },
+    warning: function (m) { show(m, 'warning'); },
   };
 })();

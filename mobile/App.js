@@ -17,6 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import store from './src/store';
 import syncClient from './src/syncClient';
+import notifications from './src/notifications';
 import LoginScreen from './src/screens/LoginScreen';
 import EventsScreen from './src/screens/EventsScreen';
 import TodosScreen from './src/screens/TodosScreen';
@@ -105,6 +106,7 @@ export default function App() {
       if (!mounted) return;
       syncClient.startAutoPush(store);
       if (store.getToken()) syncClient.syncNow(); // 启动后自动同步一次
+      notifications.init(); // 本地通知：请求权限 + 首次排程 + 数据变更防抖重排
     });
     return () => {
       mounted = false;

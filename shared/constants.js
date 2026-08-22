@@ -102,6 +102,16 @@ const QUADRANT_ORDER = ['q1', 'q2', 'q3', 'q4'];
 
 const URGENT_THRESHOLD_HOURS = 24; // 截止前多少小时内视为「紧急」
 
+// 预估耗时选项（分钟，时间块排程用）
+const ESTIMATED_MINUTES_OPTIONS = [15, 30, 45, 60, 90, 120, 180, 240];
+
+// 默认工作时段（自动排程的时间窗，本地时区小时数）
+const WORK_HOURS = { start: 9, end: 18 };
+
+// 自动排程默认槽位粒度与块间缓冲（分钟）
+const SCHEDULE_SLOT_MINUTES = 30;
+const SCHEDULE_BUFFER_MINUTES = 5;
+
 module.exports = {
   STATUS,
   STATUS_LABEL,
@@ -121,4 +131,8 @@ module.exports = {
   QUADRANT_COLOR,
   QUADRANT_ORDER,
   URGENT_THRESHOLD_HOURS,
+  ESTIMATED_MINUTES_OPTIONS,
+  WORK_HOURS,
+  SCHEDULE_SLOT_MINUTES,
+  SCHEDULE_BUFFER_MINUTES,
 };

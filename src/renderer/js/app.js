@@ -7,6 +7,9 @@ window.App = (function () {
   const MODULES = {
     schedule: window.Modules.schedule,
     todo: window.Modules.todo,
+    plan: window.Modules.plan,
+    inbox: window.Modules.inbox,
+    review: window.Modules.review,
     search: window.Modules.search,
     stats: window.Modules.stats,
     settings: window.Modules.settings,
@@ -35,12 +38,26 @@ window.App = (function () {
       renderCurrent();
     });
 
+    // 全局快捷键快速捕捉 -> 打开收件箱快速捕捉弹窗
+    API.onQuickCapture(function () {
+      switchView('inbox');
+      if (MODULES.inbox && MODULES.inbox.openQuickCapture) MODULES.inbox.openQuickCapture();
+    });
+
     // 同步拉取到新数据 -> 重新加载并刷新
     API.onSyncDataUpdated(function () {
       API.loadData().then(function (loaded) {
         Store.set(loaded);
         Toast.info('已同步最新数据');
       });
+    });
+
+    // 同步冲突：本地修改被其他设备覆盖 -> 警告提示
+    API.onSyncConflict(function (conflicts) {
+      if (!conflicts || !conflicts.length) return;
+      const names = conflicts.map(function (c) { return c.title || c.id; }).slice(0, 3).join('、');
+      const more = conflicts.length > 3 ? ' 等 ' + conflicts.length + ' 条' : '';
+      Toast.warning('有 ' + conflicts.length + ' 条记录被其他设备更新：' + names + more);
     });
 
     // 导航切换

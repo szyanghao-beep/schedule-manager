@@ -16,6 +16,8 @@
   var REPEAT_TYPE = { NONE: 'none', DAILY: 'daily', WEEKLY: 'weekly', MONTHLY: 'monthly', CUSTOM: 'custom' };
   var IMPORTANCE = { IMPORTANT: 'important', NOT_IMPORTANT: 'not_important' };
   var QUADRANT = { Q1: 'q1', Q2: 'q2', Q3: 'q3', Q4: 'q4' };
+  var QUADRANT_ORDER = ['q1', 'q2', 'q3', 'q4'];
+  var PRIORITY_ORDER = { high: 2, medium: 1, low: 0 };
 
   function pad(n) { return n < 10 ? '0' + n : '' + n; }
 
@@ -95,6 +97,12 @@
     if (!input.title || !String(input.title).trim()) errors.push('标题不能为空');
     if (input.repeat && input.repeat.type === REPEAT_TYPE.CUSTOM && (!input.repeat.interval || input.repeat.interval < 1)) {
       errors.push('自定义周期需为正整数');
+    }
+    if (input.estimatedMinutes != null) {
+      var em = Number(input.estimatedMinutes);
+      if (!isFinite(em) || em <= 0 || Math.floor(em) !== em || em > 1440) {
+        errors.push('预估耗时需为 1~1440 的整数分钟');
+      }
     }
     return { ok: errors.length === 0, errors: errors };
   }
@@ -328,6 +336,142 @@
     return merged.slice(-30);
   }
 
+  // ---- 时间块排程（Time Blocking）----
+  // 把已合并的区间按起点排序合并重叠段
+  function mergeIntervals(arr) {
+    if (!arr.length) return [];
+    var sorted = arr.slice().sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+    var out = [sorted[0].slice()];
+    for (var i = 1; i < sorted.length; i++) {
+      var cur = sorted[i];
+      var last = out[out.length - 1];
+      if (cur[0] <= last[1]) {
+        if (cur[1] > last[1]) last[1] = cur[1];
+      } else {
+        out.push(cur.slice());
+      }
+    }
+    return out;
+  }
+
+  // 区间 [s,e) 是否与任一已占用区间重叠（端点相接不视为重叠，允许块紧邻）
+  function overlapsInterval(s, e, intervals) {
+    for (var i = 0; i < intervals.length; i++) {
+      var it = intervals[i];
+      if (s < it[1] && it[0] < e) return true;
+    }
+    return false;
+  }
+
+  // 在 [from, workEnd] 内按 slot 粒度找到第一个能容纳 dur 的空闲槽位；找不到返回 null
+  function findFreeSlot(from, dur, occupied, workEnd, slotMs) {
+    var t = Math.ceil(from / slotMs) * slotMs;
+    var maxStart = workEnd - dur;
+    while (t <= maxStart) {
+      if (!overlapsInterval(t, t + dur, occupied)) return t;
+      t += slotMs;
+    }
+    return null;
+  }
+
+  // 由待办生成一个时间块 { start, end, minutes }；无预估耗时回退 defaultMinutes（默认 60）
+  function blockFromTodo(todo, start, defaultMinutes) {
+    var min = (todo && todo.estimatedMinutes) ? Number(todo.estimatedMinutes) : 0;
+    if (!(min > 0)) min = defaultMinutes || 60;
+    return { start: start, end: start + min * 60000, minutes: min };
+  }
+
+  // 自动排程：把待办按「截止时间 → 四象限 → 优先级」贪心填入当天工作时段内的空闲槽位。
+  // 输入：todos（待排程待办，含 estimatedMinutes>0 且未完成）、events（当天已占用的日程）、opts。
+  // opts：
+  //   now（默认 Date.now()）、dayStart/dayEnd（默认当天）、
+  //   workStart/workEnd（默认 dayStart + workStartHour/workEndHour，缺省 9/18）、
+  //   slotMinutes（默认 30）、bufferMinutes（默认 0）、urgentThresholdMs（默认 24h）。
+  // 返回 { blocks:[{todoId,start,end}], unscheduled:[todoId], workStart, workEnd }。
+  function autoSchedule(todos, events, opts) {
+    opts = opts || {};
+    var now = opts.now != null ? opts.now : Date.now();
+    var dayStart = opts.dayStart != null ? opts.dayStart : startOfDay(now);
+    var dayEnd = opts.dayEnd != null ? opts.dayEnd : addDays(dayStart, 1);
+    var workStart = opts.workStart != null ? opts.workStart : dayStart + (opts.workStartHour != null ? opts.workStartHour : 9) * 3600000;
+    var workEnd = opts.workEnd != null ? opts.workEnd : dayStart + (opts.workEndHour != null ? opts.workEndHour : 18) * 3600000;
+    var slotMs = Math.max(1, opts.slotMinutes != null ? opts.slotMinutes : 30) * 60000;
+    var bufferMs = Math.max(0, opts.bufferMinutes != null ? opts.bufferMinutes : 0) * 60000;
+    var threshold = opts.urgentThresholdMs != null ? opts.urgentThresholdMs : 24 * 3600000;
+
+    // 已占用区间：全天事件占整天，时段事件取与工作时段交集
+    var occupied = [];
+    (events || []).forEach(function (e) {
+      if (e.allDay) { occupied.push([dayStart, dayEnd]); return; }
+      if (e.startTime == null || e.endTime == null) return;
+      var s = Math.max(workStart, e.startTime);
+      var en = Math.min(workEnd, e.endTime);
+      if (en > s) occupied.push([s, en]);
+    });
+    occupied = mergeIntervals(occupied);
+
+    // 候选：未完成且 estimatedMinutes > 0 的待办
+    var candidates = (todos || []).filter(function (t) {
+      return t && t.status !== 'done' && Number(t.estimatedMinutes) > 0;
+    });
+
+    // 排序：有截止时间在前（按截止升序），随后按四象限优先级，再按优先级高者先
+    candidates.sort(function (a, b) {
+      var ad = a.deadline == null ? 1 : 0;
+      var bd = b.deadline == null ? 1 : 0;
+      if (ad !== bd) return ad - bd;
+      if (a.deadline != null && b.deadline != null && a.deadline !== b.deadline) return a.deadline - b.deadline;
+      var aqi = QUADRANT_ORDER.indexOf(calcQuadrant(a, now, threshold));
+      var bqi = QUADRANT_ORDER.indexOf(calcQuadrant(b, now, threshold));
+      if (aqi !== bqi) return aqi - bqi;
+      var ap = PRIORITY_ORDER[a.priority] != null ? PRIORITY_ORDER[a.priority] : 1;
+      var bp = PRIORITY_ORDER[b.priority] != null ? PRIORITY_ORDER[b.priority] : 1;
+      return bp - ap;
+    });
+
+    var blocks = [];
+    var unscheduled = [];
+    var from = Math.max(workStart, now);
+    candidates.forEach(function (t) {
+      var dur = Number(t.estimatedMinutes) * 60000;
+      if (dur > workEnd - workStart) { unscheduled.push(t.id); return; }
+      var start = findFreeSlot(from, dur, occupied, workEnd, slotMs);
+      if (start == null) { unscheduled.push(t.id); return; }
+      var end = start + dur;
+      blocks.push({ todoId: t.id, start: start, end: end });
+      occupied = mergeIntervals(occupied.concat([[start, end]]));
+      from = end + bufferMs;
+    });
+
+    return { blocks: blocks, unscheduled: unscheduled, workStart: workStart, workEnd: workEnd };
+  }
+
+  // ---- 周回顾统计（GTD weekly review）----
+  // 汇总本周：完成数 / 新增数 / 逾期数 / 收件箱（无截止时间）积压 / 缺预估耗时数 / 四象限分布。
+  function calcWeeklyReview(todos, now) {
+    if (now == null) now = Date.now();
+    var weekStart = startOfWeek(now);
+    var threshold = 24 * 3600000;
+    var summary = {
+      doneWeek: 0, createdWeek: 0, overdue: 0, inbox: 0, noEstimate: 0,
+      byQuadrant: { q1: 0, q2: 0, q3: 0, q4: 0, total: 0 },
+    };
+    (todos || []).forEach(function (t) {
+      if (t.createdAt != null && t.createdAt >= weekStart && t.createdAt <= now) summary.createdWeek++;
+      if (t.status === 'done') {
+        if (t.completedAt != null && t.completedAt >= weekStart && t.completedAt <= now) summary.doneWeek++;
+        return;
+      }
+      if (displayStatus(t, now) === STATUS.OVERDUE) summary.overdue++;
+      if (t.deadline == null) summary.inbox++;
+      if (!(Number(t.estimatedMinutes) > 0)) summary.noEstimate++;
+      var q = calcQuadrant(t, now, threshold);
+      summary.byQuadrant[q]++;
+      summary.byQuadrant.total++;
+    });
+    return summary;
+  }
+
   return {
     STATUS: STATUS,
     REPEAT_TYPE: REPEAT_TYPE,
@@ -354,5 +498,8 @@
     calcDrillItems: calcDrillItems,
     searchItems: searchItems,
     mergeTrend: mergeTrend,
+    autoSchedule: autoSchedule,
+    blockFromTodo: blockFromTodo,
+    calcWeeklyReview: calcWeeklyReview,
   };
 }));

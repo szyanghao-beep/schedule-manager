@@ -297,6 +297,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .toast.hide { opacity: 0; }
 .toast-success { background: var(--success); }
 .toast-error { background: var(--danger); }
+.toast-warning { background: var(--warning); color: #3a2c12; }
 
 /* ---------- 右键菜单 ---------- */
 .context-menu {
@@ -489,3 +490,17 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .trend-table-cell { text-align: right; }
 .trend-table-head .trend-table-date { text-align: left; }
 .trend-table-head .trend-table-cell { font-weight: 600; }
+
+/* ---------- 今日规划 / 周回顾 ---------- */
+.plan-summary { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.plan-summary-item {
+  flex: 1;
+  min-width: 120px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+.plan-summary-label { font-size: 12px; color: var(--muted); }
+.plan-summary-value { font-size: 20px; font-weight: 600; margin-top: 4px; }
+.review-check { padding: 6px 0; font-size: 13px; color: var(--text); }

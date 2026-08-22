@@ -171,6 +171,10 @@ window.Modules.todo = (function () {
     side.appendChild(H.quadrantBadge(t));
     side.appendChild(H.badge('priority', t.priority));
     side.appendChild(H.badge('status', status));
+    const schedBtn = el('button', 'btn btn-sm', '⏱ 排到日程');
+    schedBtn.title = '把该待办按预估耗时排到日程，生成时间块';
+    schedBtn.addEventListener('click', function (e) { e.stopPropagation(); scheduleTodo(t); });
+    side.appendChild(schedBtn);
 
     row.appendChild(check);
     row.appendChild(main);
@@ -183,6 +187,7 @@ window.Modules.todo = (function () {
       window.ContextMenu.show(e.clientX, e.clientY, [
         { label: t.status === 'done' ? '标记未完成' : '标记完成', onClick: function () { toggle(t); } },
         { label: '编辑', onClick: function () { openTodoForm(t); } },
+        { label: '排到日程', onClick: function () { scheduleTodo(t); } },
         '-',
         { label: '删除', danger: true, onClick: function () { Store.deleteTodo(t.id); window.Toast.success('已删除'); } },
       ]);
@@ -270,6 +275,19 @@ window.Modules.todo = (function () {
     importanceRow.appendChild(importanceSelect);
     body.appendChild(importanceRow);
 
+    const estRow = el('div', 'form-row');
+    estRow.appendChild(el('label', null, '预估耗时（时间块排程用）'));
+    const estSelect = el('select');
+    estSelect.dataset.field = 'estimatedMinutes';
+    const estNone = el('option'); estNone.value = ''; estNone.textContent = '不设定';
+    estSelect.appendChild(estNone);
+    C.ESTIMATED_MINUTES_OPTIONS.forEach(function (m) {
+      const o = el('option'); o.value = m; o.textContent = m + ' 分钟'; estSelect.appendChild(o);
+    });
+    estSelect.value = (t && t.estimatedMinutes) ? t.estimatedMinutes : '';
+    estRow.appendChild(estSelect);
+    body.appendChild(estRow);
+
     const rr = el('div', 'form-grid');
     const repeatRow = el('div', 'form-row');
     repeatRow.appendChild(el('label', null, '重复'));
@@ -327,6 +345,7 @@ window.Modules.todo = (function () {
           importance: d.importance || 'important',
           repeat: H.buildRepeat(d),
           remindBefore: Number(d.remindBefore),
+          estimatedMinutes: d.estimatedMinutes ? Number(d.estimatedMinutes) : null,
         };
         const v = window.Utils.validateTodo(input);
         if (!v.ok) { window.Toast.error(v.errors[0]); return false; }
@@ -343,5 +362,60 @@ window.Modules.todo = (function () {
     });
   }
 
-  return { render: render, openTodoForm: openTodoForm, toggle: toggle };
+  // 当前时间向上取整到下一个 30 分钟槽位，作为默认时间块起点
+  function nextBlockStart() {
+    const d = new Date();
+    const slot = Math.ceil(d.getMinutes() / 30) * 30;
+    d.setSeconds(0, 0);
+    if (slot === 60) { d.setMinutes(0); d.setHours(d.getHours() + 1); }
+    else d.setMinutes(slot);
+    return d.getTime();
+  }
+
+  // 排到日程：把待办按预估耗时生成一个时间块日程，并记录 scheduledEventId 关联
+  function scheduleTodo(t, defaultStart) {
+    const dur = (t && t.estimatedMinutes) ? t.estimatedMinutes : 60;
+    const startInit = defaultStart || (t && t.deadline) || nextBlockStart();
+
+    const body = el('div');
+    const hint = el('div', 'item-meta', '按预估耗时 ' + dur + ' 分钟生成一个时间块日程（不会改动待办本身）。');
+    hint.style.marginBottom = '12px';
+    body.appendChild(hint);
+
+    const startRow = el('div', 'form-row');
+    startRow.appendChild(el('label', null, '开始时间'));
+    const grid = el('div', 'form-grid');
+    const dateInput = el('input');
+    dateInput.type = 'date'; dateInput.dataset.field = 'blockDate'; dateInput.value = window.Utils.toDateStr(startInit);
+    const timeInput = el('input');
+    timeInput.type = 'time'; timeInput.dataset.field = 'blockTime'; timeInput.value = window.Utils.toTimeStr(startInit);
+    grid.appendChild(dateInput);
+    grid.appendChild(timeInput);
+    startRow.appendChild(grid);
+    body.appendChild(startRow);
+
+    window.Modal.open({
+      title: '排到日程 · ' + (t.title || '待办'),
+      content: body,
+      okText: '创建时间块',
+      onOk: function () {
+        const d = window.Dom.readForm(body);
+        const start = window.Utils.parseDateTime(d.blockDate, d.blockTime || '09:00');
+        const end = start + dur * 60000;
+        const cat = H.categoryOf(t.categoryId);
+        const ev = {
+          id: window.Utils.genId(), status: 'pending', createdAt: Date.now(), updatedAt: Date.now(),
+          title: t.title, description: t.description || '', allDay: false,
+          startTime: start, endTime: end, priority: t.priority || 'medium',
+          categoryId: t.categoryId, categoryName: cat.name, categoryColor: cat.color,
+          repeat: { type: 'none', interval: 1, endDate: null }, remindBefore: 0,
+        };
+        Store.addEvent(ev);
+        Store.updateTodo(t.id, { scheduledEventId: ev.id });
+        window.Toast.success('已排到日程');
+      },
+    });
+  }
+
+  return { render: render, openTodoForm: openTodoForm, toggle: toggle, scheduleTodo: scheduleTodo };
 })();

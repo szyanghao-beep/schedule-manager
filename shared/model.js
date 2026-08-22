@@ -28,11 +28,15 @@ function normalizeRecord(rec, entityType) {
 // 校验一批 change 的合法性，返回 { ok, error }
 function validateChanges(changes) {
   if (!Array.isArray(changes)) return { ok: false, error: 'changes 必须为数组' };
+  if (changes.length > 1000) return { ok: false, error: '单次推送 change 数量超限（最多 1000 条）' };
+  const validTypes = Object.keys(ENTITY_TYPES).map(function (k) { return ENTITY_TYPES[k]; });
   for (let i = 0; i < changes.length; i++) {
     const ch = changes[i];
     if (!ch || typeof ch !== 'object') return { ok: false, error: '第 ' + i + ' 条 change 非法' };
     if (!ch.id || typeof ch.id !== 'string') return { ok: false, error: '第 ' + i + ' 条 change 缺少 id' };
+    if (ch.id.length > 128) return { ok: false, error: '第 ' + i + ' 条 change 的 id 过长' };
     if (!ch.entityType || typeof ch.entityType !== 'string') return { ok: false, error: '第 ' + i + ' 条 change 缺少 entityType' };
+    if (validTypes.indexOf(ch.entityType) === -1) return { ok: false, error: '第 ' + i + ' 条 change 的 entityType 非法' };
   }
   return { ok: true };
 }

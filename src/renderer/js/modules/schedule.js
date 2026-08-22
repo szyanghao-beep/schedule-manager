@@ -334,6 +334,9 @@ window.Modules.schedule = (function () {
     window.ContextMenu.show(e.clientX, e.clientY, [
       { label: '编辑待办', onClick: function () { openTodoAction(t); } },
       { label: '标记完成', onClick: function () { completeTodo(t); } },
+      { label: '排到日程', onClick: function () {
+        if (window.Modules.todo && window.Modules.todo.scheduleTodo) window.Modules.todo.scheduleTodo(t);
+      } },
     ]);
   }
 

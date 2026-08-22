@@ -10,6 +10,7 @@
     "start:reset": "react-native start --reset-cache"
   },
   "dependencies": {
+    "@notifee/react-native": "^7.8.2",
     "@react-native-async-storage/async-storage": "^1.24.0",
     "@react-navigation/bottom-tabs": "^6.6.1",
     "@react-navigation/native": "^6.1.18",
