@@ -34,4 +34,8 @@ contextBridge.exposeInMainWorld('api', {
   syncLogout: function () { return ipcRenderer.invoke('sync:logout'); },
   onSyncDataUpdated: function (cb) { ipcRenderer.on('sync-data-updated', function () { cb(); }); },
   onSyncConflict: function (cb) { ipcRenderer.on('sync-conflicts', function (e, payload) { cb(payload); }); },
+  // 内嵌同步服务器（本机作为同步中心）
+  syncServerStatus: function () { return ipcRenderer.invoke('sync-server:status'); },
+  syncServerStart: function () { return ipcRenderer.invoke('sync-server:start'); },
+  syncServerStop: function () { return ipcRenderer.invoke('sync-server:stop'); },
 });

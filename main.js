@@ -29,6 +29,7 @@ const SYNC_STATE_FILE = 'sync-state.json'; // 同步登录态与游标（独立�
 const EMAIL_SECRET_FILE = 'email-secret.json'; // SMTP 密码（safeStorage 加密，独立于 data.json）
 const AI_SECRET_FILE = 'ai-secret.json'; // AI API key（safeStorage 加密，独立于 data.json）
 const SETTINGS_ID = 'settings'; // 同步的 settings 记录 id（共享偏好：四象限阈值/默认提醒）
+const SYNC_SERVER_FILE = 'sync-server.json'; // 内嵌同步服务器开关/端口（独立于 data.json）
 
 let mainWindow = null;
 let data = null;      // 完整数据（含 notified，内部用）
@@ -42,6 +43,9 @@ let syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 }; 
 let emailSecret = { password: '' }; // SMTP 授权码/密码（仅内存 + 加密落盘）
 let emailSending = false; // 发送中防重入（避免 30s 轮询期间重复发送）
 let aiSecret = { apiKey: '' }; // AI API key（仅内存 + 加密落盘）
+let syncServer = null;      // 内嵌同步服务器 http.Server 实例（null=未运行）
+let syncServerDb = null;    // node:sqlite 数据库（服务器关闭时 close）
+let syncServerState = { enabled: false, port: 8787, running: false, error: '' }; // 内嵌服务器开关与状态
 
 // ---------- 路径 ----------
 function dataFilePath() { return path.join(app.getPath('userData'), DATA_FILE); }
@@ -732,6 +736,89 @@ function applyImported(parsed) {
   return null;
 }
 
+// ---------- 内嵌同步服务器（本机作为同步中心） ----------
+// 在 Electron 主进程内直接运行 Express + node:sqlite 后端：桌面 App 启动即成为同步中心，
+// 安卓端连本机 8787 端口即可互通，无需单独安装 Node 或手动启动 server/。
+// 依赖（express/cors/bcryptjs/jsonwebtoken）已作为根依赖打入安装包，server/src 源码随包携带。
+
+function syncServerFilePath() { return path.join(app.getPath('userData'), SYNC_SERVER_FILE); }
+function syncServerDbPath() { return path.join(app.getPath('userData'), 'sync-server.db'); }
+function syncServerSecretPath() { return path.join(app.getPath('userData'), 'sync-server.secret'); }
+
+function loadSyncServerState() {
+  try {
+    const s = JSON.parse(fs.readFileSync(syncServerFilePath(), 'utf-8'));
+    syncServerState.enabled = !!s.enabled;
+    syncServerState.port = Number(s.port) || 8787;
+  } catch (e) { /* 默认未启用 */ }
+}
+
+function persistSyncServerState() {
+  try {
+    fs.writeFileSync(syncServerFilePath(), JSON.stringify({ enabled: syncServerState.enabled, port: syncServerState.port }, null, 2), 'utf-8');
+  } catch (e) { console.error('[sync-server] 状态保存失败', e); }
+}
+
+// 与独立 server 一致：优先环境变量 SECRET，否则从 userData 读取/生成并持久化。
+function resolveSyncServerSecret() {
+  if (process.env.SECRET && process.env.SECRET !== 'change-me-in-production-use-a-long-random-string') {
+    return process.env.SECRET;
+  }
+  const p = syncServerSecretPath();
+  try {
+    const existing = fs.readFileSync(p, 'utf-8').trim();
+    if (existing) return existing;
+  } catch (e) { /* 首次运行 */ }
+  const generated = require('crypto').randomBytes(32).toString('hex');
+  try { fs.writeFileSync(p, generated, { mode: 0o600 }); } catch (e) { /* 用内存值 */ }
+  return generated;
+}
+
+function syncServerStatusPayload() {
+  return {
+    enabled: syncServerState.enabled,
+    running: syncServerState.running,
+    port: syncServerState.port,
+    url: syncServerState.running ? ('http://127.0.0.1:' + syncServerState.port) : '',
+    error: syncServerState.error || '',
+  };
+}
+
+function startSyncServer() {
+  if (syncServer) return syncServerStatusPayload(); // 已在运行
+  try {
+    const { createApp } = require('./server/src/app.js');
+    const { createDb } = require('./server/src/db.js');
+    syncServerDb = createDb(syncServerDbPath());
+    const serverApp = createApp(syncServerDb, resolveSyncServerSecret());
+    syncServer = serverApp.listen(syncServerState.port, '0.0.0.0', function () {
+      syncServerState.running = true;
+      syncServerState.error = '';
+      console.log('[sync-server] 本机同步服务已启动 http://0.0.0.0:' + syncServerState.port);
+    });
+    syncServer.on('error', function (err) {
+      syncServerState.running = false;
+      syncServerState.error = (err && err.message) ? err.message : String(err);
+      console.error('[sync-server] 启动失败', syncServerState.error);
+      try { if (syncServerDb) syncServerDb.close(); } catch (e) { /* 忽略 */ }
+      syncServerDb = null;
+      syncServer = null;
+    });
+    return syncServerStatusPayload();
+  } catch (e) {
+    syncServerState.running = false;
+    syncServerState.error = e.message || String(e);
+    return syncServerStatusPayload();
+  }
+}
+
+function stopSyncServer() {
+  if (syncServer) { try { syncServer.close(); } catch (e) { /* 忽略 */ } syncServer = null; }
+  if (syncServerDb) { try { syncServerDb.close(); } catch (e) { /* 忽略 */ } syncServerDb = null; }
+  syncServerState.running = false;
+  return syncServerStatusPayload();
+}
+
 function registerIpc() {
   ipcMain.handle('data:load', function () { return publicData(); });
 
@@ -958,6 +1045,19 @@ function registerIpc() {
     persistSyncState();
     return true;
   });
+
+  // 内嵌同步服务器（本机作为同步中心）
+  ipcMain.handle('sync-server:status', function () { return syncServerStatusPayload(); });
+  ipcMain.handle('sync-server:start', function () {
+    syncServerState.enabled = true;
+    persistSyncServerState();
+    return startSyncServer();
+  });
+  ipcMain.handle('sync-server:stop', function () {
+    syncServerState.enabled = false;
+    persistSyncServerState();
+    return stopSyncServer();
+  });
 }
 
 // ---------- 全局快速捕捉（GTD 收件箱） ----------
@@ -1066,6 +1166,8 @@ app.whenReady().then(function () {
   if (process.platform === 'win32') app.setAppUserModelId('com.schedule.manager'); // Windows 通知/任务栏身份
   loadData();
   loadSyncState(); // 恢复上次的同步登录态与游标（token 已加密持久化）
+  loadSyncServerState(); // 恢复内嵌同步服务器开关
+  if (syncServerState.enabled) startSyncServer(); // 已启用则自动启动本机同步服务
   loadEmailSecret(); // 恢复 SMTP 密码（已加密持久化）
   loadAiSecret(); // 恢复 AI API key（已加密持久化）
   registerIpc();
@@ -1090,7 +1192,7 @@ app.whenReady().then(function () {
 
 app.on('before-quit', function () { isQuitting = true; });
 
-app.on('will-quit', function () { globalShortcut.unregisterAll(); });
+app.on('will-quit', function () { globalShortcut.unregisterAll(); stopSyncServer(); });
 
 app.on('window-all-closed', function () {
   if (process.platform !== 'darwin' && !recovering) app.quit();

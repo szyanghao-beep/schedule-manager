@@ -123,6 +123,9 @@ window.Modules.settings = (function () {
     // AI（自然语言快速捕捉）
     root.appendChild(aiCard());
 
+    // 本机同步服务（内嵌后端）
+    root.appendChild(syncServerCard());
+
     // 多端同步
     root.appendChild(syncCard());
   }
@@ -278,6 +281,51 @@ window.Modules.settings = (function () {
     const b = el('button', 'btn', label);
     b.addEventListener('click', handler);
     return b;
+  }
+
+  // ---------- 本机同步服务（内嵌后端，本机作为同步中心） ----------
+  function syncServerCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '本机同步服务（同步中心）'));
+    const hint = el('div', 'item-meta', '启用后本机即作为同步服务器运行在 8787 端口，且下次开机自动启动；安卓手机连本机局域网 IP 即可互通，无需单独安装 Node。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+
+    const row = el('div', 'form-row');
+    row.style.marginTop = '10px';
+    const cb = el('input');
+    cb.type = 'checkbox';
+    const statusBox = el('div');
+    statusBox.style.marginTop = '8px';
+
+    function refresh(st) {
+      cb.checked = !!(st && st.running);
+      window.Dom.clear(statusBox);
+      if (st && st.running) {
+        statusBox.appendChild(el('div', 'item-meta', '运行中：' + st.url + '　手机端地址 http://<本机局域网IP>:' + st.port));
+      } else if (st && st.error) {
+        statusBox.appendChild(el('div', 'item-meta', '启动失败：' + st.error));
+      } else {
+        statusBox.appendChild(el('div', 'item-meta', '已停止'));
+      }
+    }
+
+    cb.addEventListener('change', function () {
+      const p = cb.checked ? window.API.syncServerStart() : window.API.syncServerStop();
+      p.then(refresh).catch(function (e) {
+        window.Toast.error('操作失败：' + (e.message || e));
+        refresh(null);
+      });
+    });
+
+    row.appendChild(cb);
+    row.appendChild(el('label', null, '启用本机同步服务'));
+    card.appendChild(row);
+    card.appendChild(statusBox);
+    window.API.syncServerStatus().then(refresh)
+      .catch(function () { statusBox.appendChild(el('div', 'placeholder', '同步服务不可用')); });
+    return card;
   }
 
   // ---------- 多端同步 ----------

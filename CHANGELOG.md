@@ -11,11 +11,23 @@
 | 结构 | 主进程 `main.js` + `preload.js`（项目根目录）；渲染层 `src/renderer/` |
 | 数据持久化 | `userData/data.json`，防抖保存 500ms，自动备份（最多 10 份） |
 | 仓库 | https://github.com/szyanghao-beep/schedule-manager.git（分支 `main`） |
-| 当前版本 | **v2.3.0** |
+| 当前版本 | **v2.3.1** |
 
 ---
 
 ## 版本历史
+
+### v2.3.1（2026-08-23）— 内嵌同步服务器（桌面端即同步中心）
+
+修复 v2.3.0 安装包「后端服务未打包、安装后无法启动同步服务」的问题，并改用**方案 A：把 Express 后端内嵌进桌面 App**——桌面 App 启动时在本机同进程跑起 8787 端口同步服务，桌面端自己就是同步中心。
+
+- **后端内嵌**：`main.js` 增加 `startSyncServer()`/`stopSyncServer()`，惰性加载 `server/src/app.js` + `server/src/db.js`，用 Electron 43.4.0 内置的 Node v24 `node:sqlite` 直连 `userData/sync-server.db`，无需单独安装 Node 或手动启动服务。
+- **设置页开关**：设置页新增「本机同步服务（同步中心）」卡片，勾选启用即启动 8787 服务并**下次开机自动启动**（状态持久化 `userData/sync-server.json`）；界面实时显示运行状态与「手机端地址 http://<本机局域网IP>:8787」。
+- **JWT 密钥**：`resolveSyncServerSecret()` 优先读 `SCHEDULE_SYNC_SECRET` 环境变量，否则在 `userData/sync-server.secret` 自动生成并持久化。
+- **打包修复**：`build.files` 增加 `server/src/**/*`；`dependencies` 补齐 `express`/`cors`/`jsonwebtoken`/`bcryptjs`（随 `app.asar` 一起打包）。
+- **退出清理**：`will-quit` 中调用 `stopSyncServer()`，端口随 App 退出释放。
+
+验证：打包后的 `dist/win-unpacked/日程管理.exe` 启动即拉起 8787 服务，`/health` 返回 ok，注册（200）/推送（accepted=1）/拉取（1 条「测试日程」）全链路通过。
 
 ### v2.3.0（2026-08-23）— 日历增强（农历/节气/节假日/纪念日）+ 收支记账
 

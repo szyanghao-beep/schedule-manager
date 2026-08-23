@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>日程管理 · 多端后台同步说明书</title>
+<link rel="stylesheet" href="_assets/doc.css" />
+</head>
+<body>
+
+<!-- ============ 封面 ============ -->
+<div class="page cover">
+  <svg class="logo-svg" width="120" height="120" viewBox="0 0 120 120">
+    <rect x="4" y="4" width="112" height="112" rx="22" fill="#ffffff" opacity="0.18"/>
+    <rect x="22" y="20" width="76" height="70" rx="10" fill="#ffffff"/>
+    <rect x="22" y="20" width="76" height="20" rx="10" fill="#4f8ef7"/>
+    <rect x="30" y="12" width="8" height="22" rx="3" fill="#ffffff"/>
+    <rect x="82" y="12" width="8" height="22" rx="3" fill="#ffffff"/>
+    <text x="34" y="62" font-size="26" font-family="Arial" fill="#4f8ef7" font-weight="bold">⇄</text>
+  </svg>
+  <div class="brand">多端后台同步说明书</div>
+  <div class="slogan">电脑端 + 安卓手机端，通过本机同步服务互通数据</div>
+  <div style="margin-top:14mm; font-size:12pt; line-height:2;">
+    桌面 App 内嵌同步服务器，开机即用<br/>无需单独安装 Node、无需手动启动服务
+  </div>
+  <div class="meta">
+    日程管理 · 多端后台同步说明书　|　版本 v2.3.1
+  </div>
+</div>
+
+<!-- ============ 目录 ============ -->
+<div class="page">
+  <h1>目录</h1>
+  <table>
+    <tr><th style="width:12mm;">章</th><th>内容</th></tr>
+    <tr><td>1</td><td>这是什么？同步是怎么工作的</td></tr>
+    <tr><td>2</td><td>在电脑端开启同步服务（一次设置，长期有效）</td></tr>
+    <tr><td>3</td><td>查看本机地址（手机要连的地址）</td></tr>
+    <tr><td>4</td><td>在安卓手机上连接并同步</td></tr>
+    <tr><td>5</td><td>常见问题与排查</td></tr>
+    <tr><td>6</td><td>进阶：把后端放到 NAS / 常在线服务器</td></tr>
+  </table>
+  <div class="callout">
+    <div class="ct">📖 一句话看懂</div>
+    同步中心就装在<b>电脑端 App 里</b>。电脑端打开开关，手机填电脑的局域网地址，两端数据就自动互通了。
+  </div>
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 1 页</span></div>
+</div>
+
+<!-- ============ 第1章 ============ -->
+<div class="page">
+  <h1>第 1 章　这是什么？同步是怎么工作的</h1>
+
+  <h2>什么是多端同步</h2>
+  <p>「日程管理」可以同时运行在<b>电脑（Windows/macOS）</b>和<b>安卓手机</b>上。多端同步的意思是：你在电脑上记的日程、待办、收支流水，手机上也能看到；反过来，手机上记的，电脑上也有。两端数据保持一致。</p>
+
+  <h2>同步中心在哪里（方案 A）</h2>
+  <p>v2.3.1 起，我们把<b>同步服务器直接内嵌进了电脑端 App</b>：</p>
+  <div class="grid-2">
+    <div class="card blue"><h3>🖥 电脑端 = 同步中心</h3><p>电脑端 App 启动时，在<b>本机同进程</b>跑起一个 8787 端口的同步服务。它负责保存「云端」数据、做两端数据的合并与仲裁。</p></div>
+    <div class="card blue"><h3>📱 手机端 = 客户端</h3><p>手机通过局域网连到电脑的 8787 端口，把本地改动推上去、把别人的改动拉下来，完成同步。</p></div>
+  </div>
+
+  <div class="callout ok">
+    <div class="ct">✅ 这样设计的好处</div>
+    <b>无需单独安装 Node.js</b>、无需打开命令行、无需手动启动服务。电脑端 App 一开，同步中心就跟着起来了；关机时它也一起退出，端口自动释放。
+  </div>
+
+  <h2>前提条件</h2>
+  <div class="step"><div class="n">1</div><div class="c"><b>电脑和手机在同一个局域网</b>——通常就是连同一个 Wi-Fi / 路由器（家庭或办公网络）。</div></div>
+  <div class="step"><div class="n">2</div><div class="c"><b>电脑端 App 正在运行</b>，并且已开启「本机同步服务」（见第 2 章）。</div></div>
+  <div class="step"><div class="n">3</div><div class="c"><b>知道电脑的局域网 IP</b>，手机端填这个地址（见第 3 章）。</div></div>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 2 页</span></div>
+</div>
+
+<!-- ============ 第2章 ============ -->
+<div class="page">
+  <h1>第 2 章　在电脑端开启同步服务</h1>
+
+  <p>只需设置一次，之后每次开机自动生效。</p>
+
+  <div class="step"><div class="n">1</div><div class="c">打开电脑端 App，进入<b>「设置」</b>。</div></div>
+  <div class="step"><div class="n">2</div><div class="c">找到<b>「本机同步服务（同步中心）」</b>卡片。</div></div>
+  <div class="step"><div class="n">3</div><div class="c">勾选<b>「启用本机同步服务」</b>。界面随即显示<b>「运行中」</b>，并给出「手机端地址 http://&lt;本机局域网IP&gt;:8787」。</div></div>
+  <div class="step"><div class="n">4</div><div class="c">（可选）取消勾选即可停止服务；下次重新勾选又会启动。</div></div>
+
+  <div class="callout">
+    <div class="ct">💡 记住这几件事</div>
+    <ul>
+      <li><b>自动启动</b>：勾选状态会保存到本机，下次开机、打开 App 即自动拉起 8787 服务，不用再手动操作。</li>
+      <li><b>自动生成密钥</b>：服务首次启动会在本地生成一个随机 JWT 密钥（<code>sync-server.secret</code>），用于加密登录令牌，无需你手动配置。</li>
+      <li><b>数据独立存放</b>：同步数据保存在 <code>sync-server.db</code> 中，与桌面端本地数据分开，互不干扰。</li>
+    </ul>
+  </div>
+
+  <div class="callout warn">
+    <div class="ct">⚠️ 如果显示「启动失败」</div>
+    通常是 8787 端口被其它程序占用（例如你之前手动跑过旧版后端）。请关闭那个程序，或重启电脑后再试。排查步骤见第 5 章。
+  </div>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 3 页</span></div>
+</div>
+
+<!-- ============ 第3章 ============ -->
+<div class="page">
+  <h1>第 3 章　查看本机地址</h1>
+
+  <p>手机要连的是<b>电脑在局域网里的 IP 地址</b>。有两种方式获取：</p>
+
+  <h2>方式一：直接在设置页看（推荐）</h2>
+  <p>开启同步服务后，设置页的卡片上会直接显示：</p>
+  <div class="callout ok">
+    <div class="ct">手机端地址</div>
+    <code style="font-size:13pt;">http://192.168.1.100:8787</code>
+  </div>
+  <p>把这段地址原样填到手机端即可（IP 是你的电脑实际 IP，示例里的 <code>192.168.1.100</code> 仅供参考）。</p>
+
+  <h2>方式二：命令行查看</h2>
+  <p>Windows 打开「命令提示符」输入 <code>ipconfig</code>，找到<b>「IPv4 地址」</b>；macOS 输入 <code>ifconfig</code>，找 <code>inet 192.168.x.x</code>。取其中的 IP，再拼上 <code>:8787</code>。</p>
+
+  <h2>地址说明</h2>
+  <table>
+    <tr><th>要素</th><th>含义</th><th>示例</th></tr>
+    <tr><td>http://</td><td>局域网内用普通 HTTP（内网明文即可）</td><td>—</td></tr>
+    <tr><td>IP</td><td>电脑的局域网 IPv4 地址</td><td>192.168.1.100</td></tr>
+    <tr><td>:8787</td><td>同步服务端口（固定）</td><td>8787</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="ct">⚠️ 不要填 127.0.0.1</div>
+    <code>127.0.0.1</code> 代表「本机自己」，手机填它是连手机自己，永远连不上电脑。一定要填电脑在局域网里的真实 IP（一般是 <code>192.168.x.x</code> 或 <code>10.x.x.x</code>）。
+  </div>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 4 页</span></div>
+</div>
+
+<!-- ============ 第4章 ============ -->
+<div class="page">
+  <h1>第 4 章　在安卓手机上连接并同步</h1>
+
+  <div class="step"><div class="n">1</div><div class="c">手机安装并打开「日程管理」安卓端。</div></div>
+  <div class="step"><div class="n">2</div><div class="c">进入「设置 → 多端同步」，把<b>服务器地址</b>填成电脑的地址，例如 <code>http://192.168.1.100:8787</code>。</div></div>
+  <div class="step"><div class="n">3</div><div class="c">填一个<b>用户名 + 密码</b>，点<b>「注册并登录」</b>（首次注册；以后直接登录）。</div></div>
+  <div class="step"><div class="n">4</div><div class="c">点<b>「立即同步」</b>。之后两端每次改动会自动同步；也可随时手动点「立即同步」。</div></div>
+
+  <h2>同步机制（简要）</h2>
+  <ul>
+    <li><b>记录级增量</b>：每条日程/待办/流水单独同步，而不是整份文件覆盖，效率高、不冲突。</li>
+    <li><b>软删除</b>：删除只是打上「已删除」标记，防止旧数据在一端复活。</li>
+    <li><b>编辑时间仲裁</b>：同一条记录被两端改动时，以「最后编辑时间」较新者为准。</li>
+  </ul>
+
+  <div class="callout">
+    <div class="ct">🔐 账号与密钥</div>
+    登录令牌用本机自动生成的密钥加密，仅保存在你的电脑上；同步数据只在本机局域网内流转，不上传任何第三方服务器。
+  </div>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 5 页</span></div>
+</div>
+
+<!-- ============ 第5章 ============ -->
+<div class="page">
+  <h1>第 5 章　常见问题与排查</h1>
+
+  <h2>Q1：手机连不上，提示「网络错误 / 连接超时」</h2>
+  <div class="step"><div class="n">1</div><div class="c">确认电脑端 App 已开启同步服务、显示「运行中」。</div></div>
+  <div class="step"><div class="n">2</div><div class="c">确认手机和电脑连<b>同一个 Wi-Fi</b>（手机别用流量）。</div></div>
+  <div class="step"><div class="n">3</div><div class="c">确认地址是电脑的真实局域网 IP，不是 <code>127.0.0.1</code>。</div></div>
+  <div class="step"><div class="n">4</div><div class="c">检查<b>防火墙</b>：Windows 首次运行可能弹出「允许访问专用网络」的提示，勾选<b>允许</b>。</div></div>
+
+  <h2>Q2：设置页显示「启动失败」</h2>
+  <p>通常是 8787 端口被占用。可用命令 <code>netstat -ano | findstr 8787</code> 查到占用进程 PID 并结束它；若不确定，直接<b>重启电脑</b>最省事。</p>
+
+  <h2>Q3：出门/断网后，手机还能用吗</h2>
+  <p>可以。两端各自有<b>本地完整数据</b>，离线也能正常查看和新增；等回到同一局域网、电脑端 App 打开时，再点「立即同步」即可把离线改动补上。</p>
+
+  <h2>Q4：换了一台电脑，手机要重新配置吗</h2>
+  <p>要。同步中心（数据）就在原电脑的 <code>sync-server.db</code> 里，换电脑后新电脑是全新的同步中心。手机端把服务器地址改成新电脑的 IP，重新注册登录即可。</p>
+
+  <h2>Q5：想在外网（公司→家里）同步怎么办</h2>
+  <p>本方案默认只在<b>同一局域网</b>内同步。若需跨网络，请把后端部署到一台常在线、有公网地址（或内网穿透）的设备上，见第 6 章。</p>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 6 页</span></div>
+</div>
+
+<!-- ============ 第6章 ============ -->
+<div class="page">
+  <h1>第 6 章　进阶：把后端放到 NAS / 常在线服务器</h1>
+
+  <p>如果你希望<b>不依赖电脑开机</b>，随时随地同步（含外网），可以把后端独立部署到一台常在线设备（NAS、云服务器、树莓派等）。</p>
+
+  <h2>独立后端（Node 方式）</h2>
+  <p>项目自带可独立运行的 Node 后端（<code>server/</code> 目录），与内嵌版是同一套代码：</p>
+  <div class="callout">
+    <div class="ct">启动命令</div>
+    <pre style="font-size:10pt; line-height:1.6;">cd server
+npm install
+npm start            # 监听 0.0.0.0:8787，自动生成密钥</pre>
+  </div>
+  <p>随后电脑端和手机端都把「服务器地址」指向这台设备的地址即可，不再依赖电脑端 App 开关。</p>
+
+  <h2>两种模式对比</h2>
+  <table>
+    <tr><th>对比项</th><th>内嵌式（方案 A，默认）</th><th>独立后端（进阶）</th></tr>
+    <tr><td>部署难度</td><td>零，勾选即用</td><td>需装 Node、会基本命令行</td></tr>
+    <tr><td>同步范围</td><td>同一局域网</td><td>局域网 / 外网（配公网或穿透）</td></tr>
+    <tr><td>依赖</td><td>电脑端 App 需运行</td><td>部署设备需常在线</td></tr>
+    <tr><td>适用场景</td><td>个人、家里/办公室自用</td><td>多设备、跨网络、团队</td></tr>
+  </table>
+
+  <div class="callout warn">
+    <div class="ct">⚠️ 外网部署请注意安全</div>
+    独立后端默认无 HTTPS，若暴露到公网，请务必置于反向代理（Nginx/Caddy + TLS）之后，并设置强密码。
+  </div>
+
+  <div class="footer"><span>日程管理 · 多端后台同步说明书</span><span>第 7 页</span></div>
+</div>
+
+</body>
+</html>
