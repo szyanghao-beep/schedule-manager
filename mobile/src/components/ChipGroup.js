@@ -1,15 +1,17 @@
 /**
- * ChipGroup.js — 单选标签组（优先级 / 重要性 / 重复类型 / 提醒提前量等）。
- * options: [{value, label}]；value 为当前选中值；onChange(value) 回调。
+ * ChipGroup.js — 标签组（单选/多选）。
+ * options: [{value, label}]；value 为当前选中值（单选）或选中值数组（multi）；
+ * onChange(value) 回调（单选传单值，多选传被点击的那个单值，由父组件维护选中数组）。
  */
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 
-export default function ChipGroup({ options, value, onChange, style }) {
+export default function ChipGroup({ options, value, onChange, style, multi }) {
+  const arr = multi ? (value || []) : null;
   return (
     <View style={[styles.row, style]}>
       {options.map((o) => {
-        const active = o.value === value;
+        const active = multi ? arr.indexOf(o.value) >= 0 : o.value === value;
         return (
           <TouchableOpacity
             key={String(o.value)}

@@ -16,6 +16,8 @@
         <button class="nav-item" data-view="plan">今日规划</button>
         <button class="nav-item" data-view="inbox">收件箱</button>
         <button class="nav-item" data-view="review">周回顾</button>
+        <button class="nav-item" data-view="memorials">纪念日</button>
+        <button class="nav-item" data-view="bookkeeping">记账</button>
         <button class="nav-item" data-view="search">搜索</button>
         <button class="nav-item" data-view="stats">统计</button>
         <button class="nav-item" data-view="settings">设置</button>
@@ -27,6 +29,8 @@
       <section id="view-plan" class="view"></section>
       <section id="view-inbox" class="view"></section>
       <section id="view-review" class="view"></section>
+      <section id="view-memorials" class="view"></section>
+      <section id="view-bookkeeping" class="view"></section>
       <section id="view-search" class="view"></section>
       <section id="view-stats" class="view"></section>
       <section id="view-settings" class="view"></section>
@@ -38,6 +42,10 @@
   <div id="context-menu-root"></div>
 
   <script src="../../shared/utils.js"></script>
+  <script src="../../shared/vendor/lunar.js"></script>
+  <script src="../../shared/lunar.js"></script>
+  <script src="../../shared/nlp.js"></script>
+  <script src="../../shared/bookkeeping.js"></script>
   <script src="js/dom.js"></script>
   <script src="js/api.js"></script>
   <script src="js/helpers.js"></script>
@@ -53,6 +61,8 @@
   <script src="js/modules/plan.js"></script>
   <script src="js/modules/inbox.js"></script>
   <script src="js/modules/review.js"></script>
+  <script src="js/modules/memorials.js"></script>
+  <script src="js/modules/bookkeeping.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

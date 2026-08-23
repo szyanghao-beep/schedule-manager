@@ -37,7 +37,7 @@ window.Modules.settings = (function () {
     C.REMIND_OPTIONS.forEach(function (m) {
       const opt = el('option');
       opt.value = m;
-      opt.textContent = m === 0 ? '不提醒' : '提前 ' + m + ' 分钟';
+      opt.textContent = window.Utils.formatRemind(m);
       sel.appendChild(opt);
     });
     sel.value = Store.get().settings.defaultRemindBefore || 0;
@@ -71,6 +71,12 @@ window.Modules.settings = (function () {
     themeRow.appendChild(themeSel);
     themeCard.appendChild(themeRow);
     root.appendChild(themeCard);
+
+    // 日历显示（农历/节气/节假日）
+    root.appendChild(calendarCard());
+
+    // 节假日数据导入（A5）
+    root.appendChild(holidayCard());
 
     // 时间管理四象限
     const quadCard = el('div', 'card');
@@ -111,8 +117,94 @@ window.Modules.settings = (function () {
     dataCard.appendChild(btnRow);
     root.appendChild(dataCard);
 
+    // 邮件提醒
+    root.appendChild(emailCard());
+
+    // AI（自然语言快速捕捉）
+    root.appendChild(aiCard());
+
     // 多端同步
     root.appendChild(syncCard());
+  }
+
+  // 日历显示（农历/节气/节假日开关）
+  function calendarCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '日历显示'));
+    const hint = el('div', 'item-meta', '在月/周/日视图显示农历日期、二十四节气与法定节假日（休/班）。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+    const cal = Store.get().settings.calendar || {};
+    [['showLunar', '显示农历日期'], ['showSolarTerms', '显示节气'], ['showHolidays', '显示法定节假日（休/班）'], ['restDayAffectsPlanning', '休息日/调休日暂停自动排程']].forEach(function (pair) {
+      const row = el('div', 'form-row');
+      row.appendChild(el('label', null, pair[1]));
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.checked = cal[pair[0]] !== false;
+      cb.addEventListener('change', function () {
+        const next = Object.assign({}, Store.get().settings.calendar || {});
+        next[pair[0]] = cb.checked;
+        Store.set({ settings: Object.assign({}, Store.get().settings, { calendar: next }) });
+        window.Toast.success('已保存');
+      });
+      row.appendChild(cb);
+      card.appendChild(row);
+    });
+    return card;
+  }
+
+  // 节假日数据导入（A5）：内置 2026 年，跨年后手动导入新年度 JSON 覆盖表
+  function holidayCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '节假日数据'));
+    const hint = el('div', 'item-meta', '内置 2026 年法定节假日与调休。跨年后在此导入新年度数据：JSON 对象 {"YYYY-MM-DD":{"name":"春节","isWork":false}}，isWork=false 为放假、true 为调休上班。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+
+    const countRow = el('div', 'item-meta', '已导入自定义节假日：' + Object.keys(Store.get().settings.holidayData || {}).length + ' 天');
+    card.appendChild(countRow);
+
+    const ta = el('textarea');
+    ta.rows = 5;
+    ta.placeholder = '粘贴 JSON，例如：\n{"2027-01-01":{"name":"元旦","isWork":false},"2027-01-04":{"name":"元旦调休","isWork":true}}';
+    ta.style.width = '100%';
+    ta.style.marginTop = '8px';
+    card.appendChild(ta);
+
+    const btnRow = el('div', 'toolbar');
+    btnRow.style.marginTop = '8px';
+    const importBtn = el('button', 'btn btn-primary btn-sm', '导入 / 合并');
+    importBtn.addEventListener('click', function () {
+      const text = ta.value.trim();
+      if (!text) { window.Toast.error('请粘贴 JSON 数据'); return; }
+      let obj;
+      try { obj = JSON.parse(text); } catch (e) { window.Toast.error('JSON 解析失败：' + (e.message || e)); return; }
+      if (!obj || typeof obj !== 'object' || Array.isArray(obj)) { window.Toast.error('格式应为 JSON 对象'); return; }
+      const merged = Object.assign({}, Store.get().settings.holidayData || {});
+      let n = 0;
+      Object.keys(obj).forEach(function (k) {
+        const v = obj[k];
+        if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.isWork === 'boolean') {
+          merged[k] = { name: v.name || '节假日', isWork: !!v.isWork };
+          n++;
+        }
+      });
+      if (!n) { window.Toast.error('未找到有效日期条目（需含 isWork 布尔字段）'); return; }
+      Store.set({ settings: Object.assign({}, Store.get().settings, { holidayData: merged }) });
+      window.Toast.success('已导入 ' + n + ' 天');
+    });
+    const clearBtn = el('button', 'btn btn-sm', '清空自定义数据');
+    clearBtn.addEventListener('click', function () {
+      if (!confirm('清空全部自定义节假日数据？（内置 2026 年数据不受影响）')) return;
+      Store.set({ settings: Object.assign({}, Store.get().settings, { holidayData: {} }) });
+      window.Toast.success('已清空');
+    });
+    btnRow.appendChild(importBtn);
+    btnRow.appendChild(clearBtn);
+    card.appendChild(btnRow);
+    return card;
   }
 
   // 分类行
@@ -291,6 +383,228 @@ window.Modules.settings = (function () {
     const res = await window.API.restoreData();
     if (res.ok) { Store.set(res.data); window.Toast.success('已恢复'); }
     else if (!res.canceled) window.Toast.error('恢复失败：' + (res.error || ''));
+  }
+
+  // ---------- 邮件提醒 ----------
+  function emailCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '邮件提醒'));
+    const hint = el('div', 'item-meta', '每天自动发送一封待办摘要到指定邮箱（通过你自己的 SMTP 邮箱发送；仅桌面端，电脑关机当天可能漏发）。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+    const box = el('div');
+    card.appendChild(box);
+    window.API.emailStatus().then(function (st) { renderEmailContent(box, st); })
+      .catch(function () { box.appendChild(el('div', 'placeholder', '邮件功能不可用')); });
+    return card;
+  }
+
+  function emailField(label, value, placeholder, type) {
+    const row = el('div', 'form-row');
+    row.appendChild(el('label', null, label));
+    const input = el('input');
+    input.type = type || 'text';
+    input.value = value == null ? '' : String(value);
+    input.placeholder = placeholder || '';
+    row.appendChild(input);
+    return { row: row, input: input };
+  }
+
+  function renderEmailContent(box, st) {
+    window.Dom.clear(box);
+
+    const enableRow = el('div', 'form-row');
+    enableRow.appendChild(el('label', null, '启用每日邮件'));
+    const enableCheck = el('input');
+    enableCheck.type = 'checkbox';
+    enableCheck.checked = !!st.enabled;
+    enableRow.appendChild(enableCheck);
+    box.appendChild(enableRow);
+
+    const to = emailField('收件邮箱', st.to, 'you@example.com');
+    const time = emailField('发送时间', st.time, '08:00');
+    const host = emailField('SMTP 主机', st.host, 'smtp.example.com');
+    const port = emailField('端口', st.port, '465', 'number');
+    const user = emailField('SMTP 用户名', st.user, 'you@example.com');
+    const fromName = emailField('发件人名称', st.fromName, '日程管理');
+    const pass = emailField('密码/授权码', '', st.hasPassword ? '已保存（留空不修改）' : 'SMTP 授权码', 'password');
+
+    const secureRow = el('div', 'form-row');
+    secureRow.appendChild(el('label', null, '使用 SSL/TLS（端口 465 通常开启）'));
+    const secureCheck = el('input');
+    secureCheck.type = 'checkbox';
+    secureCheck.checked = st.secure !== false;
+    secureRow.appendChild(secureCheck);
+
+    box.appendChild(to.row);
+    box.appendChild(time.row);
+    box.appendChild(host.row);
+    box.appendChild(port.row);
+    box.appendChild(user.row);
+    box.appendChild(fromName.row);
+    box.appendChild(secureRow);
+    box.appendChild(pass.row);
+
+    const btnRow = el('div', 'toolbar');
+    btnRow.style.marginTop = '8px';
+    const saveBtn = el('button', 'btn btn-primary btn-sm', '保存邮件设置');
+    const testBtn = el('button', 'btn btn-sm', '发送测试邮件');
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(testBtn);
+    box.appendChild(btnRow);
+
+    if (st.lastSentDate) {
+      box.appendChild(el('div', 'item-meta', '最近发送：' + st.lastSentDate));
+    }
+
+    function collect() {
+      return {
+        reminder: { enabled: enableCheck.checked, time: time.input.value.trim() || '08:00', to: to.input.value.trim() },
+        smtp: {
+          host: host.input.value.trim(),
+          port: Number(port.input.value) || 465,
+          secure: secureCheck.checked,
+          user: user.input.value.trim(),
+          fromName: fromName.input.value.trim(),
+        },
+        password: pass.input.value, // 空字符串 = 保持原密码
+      };
+    }
+
+    function syncLocal(reminder, smtp) {
+      Store.set({
+        settings: Object.assign({}, Store.get().settings, {
+          emailReminder: reminder,
+          emailSmtp: smtp,
+        }),
+      });
+    }
+
+    saveBtn.addEventListener('click', async function () {
+      try {
+        const payload = collect();
+        const st2 = await window.API.emailSaveSettings(payload);
+        syncLocal(payload.reminder, payload.smtp);
+        window.Toast.success('已保存');
+        renderEmailContent(box, st2);
+      } catch (e) {
+        window.Toast.error('保存失败：' + (e.message || e));
+      }
+    });
+
+    testBtn.addEventListener('click', async function () {
+      try {
+        const payload = collect();
+        // 若填了新密码，先保存再测试，保证测试用最新配置
+        await window.API.emailSaveSettings(payload);
+        syncLocal(payload.reminder, payload.smtp);
+        await window.API.emailTest({ to: payload.reminder.to });
+        window.Toast.success('测试邮件已发送');
+      } catch (e) {
+        window.Toast.error('发送失败：' + (e.message || e));
+      }
+    });
+  }
+
+  // ---------- AI（自然语言快速捕捉） ----------
+  const AI_PROVIDERS = [
+    { value: 'ollama', label: 'Ollama（本地）', endpoint: 'http://localhost:11434/v1', model: 'qwen2.5:7b' },
+    { value: 'openai', label: 'OpenAI 兼容', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  ];
+
+  function aiCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', 'AI 自然语言'));
+    const hint = el('div', 'item-meta', '默认关闭。开启后，快速捕捉里输入自然语言，规则解析不了时间时会调用 AI 兜底（不静默改数据，始终由你确认）。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+    const box = el('div');
+    card.appendChild(box);
+    window.API.aiStatus().then(function (st) { renderAiContent(box, st); })
+      .catch(function () { box.appendChild(el('div', 'placeholder', 'AI 功能不可用')); });
+    return card;
+  }
+
+  function renderAiContent(box, st) {
+    window.Dom.clear(box);
+
+    const enableRow = el('div', 'form-row');
+    enableRow.appendChild(el('label', null, '启用 AI 兜底'));
+    const enableCheck = el('input');
+    enableCheck.type = 'checkbox';
+    enableCheck.checked = !!st.enabled;
+    enableRow.appendChild(enableCheck);
+    box.appendChild(enableRow);
+
+    const provRow = el('div', 'form-row');
+    provRow.appendChild(el('label', null, '提供商'));
+    const provSel = el('select');
+    AI_PROVIDERS.forEach(function (p) {
+      const opt = el('option');
+      opt.value = p.value;
+      opt.textContent = p.label;
+      provSel.appendChild(opt);
+    });
+    provSel.value = st.provider || 'ollama';
+    provRow.appendChild(provSel);
+    box.appendChild(provRow);
+
+    const endpoint = emailField('Endpoint', st.endpoint, 'http://localhost:11434/v1');
+    const model = emailField('模型名', st.model, 'qwen2.5:7b');
+    const key = emailField('API Key', '', st.hasApiKey ? '已保存（留空不修改）' : '（Ollama 本地通常无需）', 'password');
+    box.appendChild(endpoint.row);
+    box.appendChild(model.row);
+    box.appendChild(key.row);
+
+    // 切换提供商时填入对应默认 endpoint/模型（可再手改）
+    provSel.addEventListener('change', function () {
+      const p = AI_PROVIDERS.find(function (x) { return x.value === provSel.value; });
+      if (p) { endpoint.input.value = p.endpoint; model.input.value = p.model; }
+    });
+
+    const btnRow = el('div', 'toolbar');
+    btnRow.style.marginTop = '8px';
+    const saveBtn = el('button', 'btn btn-primary btn-sm', '保存 AI 设置');
+    const testBtn = el('button', 'btn btn-sm', '测试连接');
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(testBtn);
+    box.appendChild(btnRow);
+
+    function collect() {
+      return {
+        ai: {
+          enabled: enableCheck.checked,
+          provider: provSel.value,
+          endpoint: endpoint.input.value.trim(),
+          model: model.input.value.trim(),
+        },
+        apiKey: key.input.value, // 空 = 保持原 key
+      };
+    }
+
+    saveBtn.addEventListener('click', async function () {
+      try {
+        const payload = collect();
+        const st2 = await window.API.aiSaveSettings(payload);
+        Store.set({ settings: Object.assign({}, Store.get().settings, { ai: payload.ai }) });
+        window.Toast.success('已保存');
+        renderAiContent(box, st2);
+      } catch (e) {
+        window.Toast.error('保存失败：' + (e.message || e));
+      }
+    });
+
+    testBtn.addEventListener('click', async function () {
+      try {
+        await window.API.aiSaveSettings(collect());
+        const reply = await window.API.aiTest();
+        window.Toast.success('连接成功：' + reply);
+      } catch (e) {
+        window.Toast.error('连接失败：' + (e.message || e));
+      }
+    });
   }
 
   return { render: render };

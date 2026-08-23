@@ -86,7 +86,7 @@ function queryAll(root, sel) {
 
 function makeDocument() {
   const roots = {};
-  ['schedule', 'todo', 'plan', 'inbox', 'review', 'search', 'stats', 'settings'].forEach(function (v) {
+  ['schedule', 'todo', 'plan', 'inbox', 'review', 'memorials', 'bookkeeping', 'search', 'stats', 'settings'].forEach(function (v) {
     roots['view-' + v] = makeElement('div');
     roots['view-' + v].id = 'view-' + v;
   });
@@ -111,6 +111,9 @@ global.confirm = function () { return true; };
 window.document = document;
 
 window.Utils = require(path.join(ROOT, 'shared', 'utils.js'));
+window.Nlp = require(path.join(ROOT, 'shared', 'nlp.js'));
+window.LunarUtil = require(path.join(ROOT, 'shared', 'lunar.js'));
+window.Bookkeeping = require(path.join(ROOT, 'shared', 'bookkeeping.js'));
 
 // 暴露给渲染进程的主进程 API 桩（api.js 会据此构造 window.API）
 window.api = {
@@ -139,6 +142,8 @@ require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'todo.js'));
 require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'plan.js'));
 require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'inbox.js'));
 require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'review.js'));
+require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'memorials.js'));
+require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'bookkeeping.js'));
 require(path.join(ROOT, 'src', 'renderer', 'js', 'modules', 'schedule.js'));
 
 // 模块内部以裸标识符引用 Store / confirm，暴露到 global
@@ -150,6 +155,11 @@ function resetStore() {
     categories: [],
     events: [],
     todos: [],
+    memorials: [],
+    accounts: [],
+    transactions: [],
+    bookkeepingCategories: [],
+    budgets: [],
     settings: { defaultRemindBefore: 15, urgentThresholdHours: 24, theme: 'system' },
   });
 }
@@ -196,6 +206,12 @@ function findButton(root, label) {
       walk(c);
     });
   })(root);
+  return found;
+}
+
+function fieldInput(root, name) {
+  let found = null;
+  root.querySelectorAll('[data-field]').forEach(function (n) { if (n.dataset.field === name && !found) found = n; });
   return found;
 }
 
@@ -276,10 +292,10 @@ test('inbox：快速捕捉收入一条无截止时间的待办', function () {
   resetStore();
   window.Modules.inbox.openQuickCapture();
   assert.ok(lastModal, '快速捕捉应打开 Modal');
-  // 填写标题后触发 onOk
+  // 填写自然语言内容后触发 onOk
   const fields = lastModal.content.querySelectorAll('[data-field]');
-  const titleInput = fields.find(function (f) { return f.dataset.field === 'captureTitle'; });
-  assert.ok(titleInput, '捕捉表单应有标题输入框');
+  const titleInput = fields.find(function (f) { return f.dataset.field === 'captureText'; });
+  assert.ok(titleInput, '捕捉表单应有内容输入框');
   titleInput.value = '一个突如其来的想法';
   const ret = lastModal.onOk();
   assert.notStrictEqual(ret, false, '标题非空时 onOk 不应拒绝');
@@ -287,6 +303,26 @@ test('inbox：快速捕捉收入一条无截止时间的待办', function () {
   assert.strictEqual(state.todos.length, 1);
   assert.strictEqual(state.todos[0].title, '一个突如其来的想法');
   assert.strictEqual(state.todos[0].deadline, null);
+});
+
+test('inbox：快速捕捉解析自然语言创建带截止时间的待办', function () {
+  const dayStart = window.Utils.startOfDay(Date.now());
+  withNow(dayStart + 9 * 3600000, function () { // 09:00
+    resetStore();
+    window.Store.addCategory({ id: 'c-work', name: '工作', color: '#4f8ef7' });
+    window.Modules.inbox.openQuickCapture();
+    const fields = lastModal.content.querySelectorAll('[data-field]');
+    const titleInput = fields.find(function (f) { return f.dataset.field === 'captureText'; });
+    titleInput.value = '明天下午3点交报告 #工作 提前30分钟提醒';
+    lastModal.onOk();
+    const state = window.Store.get();
+    assert.strictEqual(state.todos.length, 1, '应创建 1 条待办');
+    const t = state.todos[0];
+    assert.strictEqual(t.title, '交报告');
+    assert.notStrictEqual(t.deadline, null, '应解析出截止时间');
+    assert.strictEqual(t.categoryName, '工作', '应解析出分类');
+    assert.deepStrictEqual(t.reminds, [30], '应解析出提前提醒');
+  });
 });
 
 test('review：周回顾渲染不抛错并包含关注项', function () {
@@ -328,4 +364,71 @@ test('schedule：月/周/日三种视图渲染不抛错', function () {
   resetStore();
   window.Modules.schedule.render(); // 默认月视图
   assert.ok(document.getElementById('view-schedule').children.length > 0);
+});
+
+test('memorials：渲染农历生日列表与倒计时不抛错', function () {
+  resetStore();
+  window.Store.addMemorial({
+    id: 'm1', name: '妈妈的生日', kind: 'birthday', calendar: 'lunar',
+    month: 5, day: 4, year: 1965, remindBeforeDays: 7,
+    createdAt: Date.now(), updatedAt: Date.now(),
+  });
+  window.Modules.memorials.render();
+  const txt = rootText('memorials');
+  assert.ok(txt.indexOf('纪念日') !== -1, '应有「纪念日」标题');
+  assert.ok(txt.indexOf('妈妈的生日') !== -1, '应列出名称');
+  assert.ok(txt.indexOf('农历') !== -1, '农历生日应标注历法');
+  assert.ok(txt.indexOf('提前 7 天提醒') !== -1, '应显示提前提醒天数');
+});
+
+test('bookkeeping：明细视图渲染账户余额与流水不抛错', function () {
+  resetStore();
+  window.Store.addAccount({ id: 'a1', name: '现金', type: 'cash', initialBalance: 10000, currency: 'CNY', color: '#4f8ef7', isArchived: false, createdAt: Date.now(), updatedAt: Date.now() });
+  window.Store.addBookkeepingCategory({ id: 'bc1', name: '餐饮', type: 'expense', color: '#e05b5b', parentId: null, isDefault: true, createdAt: Date.now(), updatedAt: Date.now() });
+  window.Store.addTransaction({ id: 't1', type: 'expense', amount: 2500, accountId: 'a1', toAccountId: null, categoryId: 'bc1', date: window.Utils.startOfMonth(Date.now()), note: '午饭', createdAt: Date.now(), updatedAt: Date.now() });
+  window.Modules.bookkeeping.render();
+  const txt = rootText('bookkeeping');
+  assert.ok(txt.indexOf('支出') !== -1, '明细应有支出汇总');
+  assert.ok(txt.indexOf('25.00') !== -1, '支出 25.00 元应显示');
+  assert.ok(txt.indexOf('餐饮') !== -1, '分类名应显示在流水标题');
+});
+
+test('bookkeeping：报表与预算子页渲染不抛错', function () {
+  resetStore();
+  window.Store.addAccount({ id: 'a1', name: '银行卡', type: 'bank', initialBalance: 50000, currency: 'CNY', color: '#4f8ef7', isArchived: false, createdAt: Date.now(), updatedAt: Date.now() });
+  window.Store.addBookkeepingCategory({ id: 'bc1', name: '餐饮', type: 'expense', color: '#e05b5b', parentId: null, isDefault: true, createdAt: Date.now(), updatedAt: Date.now() });
+  window.Store.addTransaction({ id: 't1', type: 'expense', amount: 3000, accountId: 'a1', toAccountId: null, categoryId: 'bc1', date: window.Utils.startOfMonth(Date.now()), note: '', createdAt: Date.now(), updatedAt: Date.now() });
+  window.Store.addBudget({ id: 'b1', categoryId: 'bc1', period: 'monthly', amount: 2000, createdAt: Date.now(), updatedAt: Date.now() });
+
+  window.Modules.bookkeeping.render();
+  const reportsBtn = findButton(document.getElementById('view-bookkeeping'), '报表');
+  assert.ok(reportsBtn, '应有「报表」子页按钮');
+  reportsBtn.dispatchEvent('click');
+  assert.ok(rootText('bookkeeping').indexOf('消费日历') !== -1, '报表页应有消费日历');
+
+  const budgetsBtn = findButton(document.getElementById('view-bookkeeping'), '预算');
+  assert.ok(budgetsBtn, '应有「预算」子页按钮');
+  budgetsBtn.dispatchEvent('click');
+  assert.ok(rootText('bookkeeping').indexOf('已超支') !== -1, '超支预算应标注「已超支」');
+});
+
+test('bookkeeping：首个新增账户自动设为默认账户', function () {
+  resetStore();
+  window.Modules.bookkeeping.render();
+  const acctBtn = findButton(document.getElementById('view-bookkeeping'), '账户');
+  assert.ok(acctBtn, '应有「账户」子页按钮');
+  acctBtn.dispatchEvent('click');
+  const addBtn = findButton(document.getElementById('view-bookkeeping'), '+ 新增账户');
+  assert.ok(addBtn, '应有「+ 新增账户」按钮');
+  addBtn.dispatchEvent('click');
+  assert.ok(lastModal && lastModal.content, '应弹出账户表单');
+  const nameInput = fieldInput(lastModal.content, 'name');
+  assert.ok(nameInput, '表单应有名称输入框');
+  nameInput.value = '现金';
+  lastModal.onOk();
+  const state = window.Store.get();
+  assert.strictEqual(state.accounts.length, 1, '应新增一个账户');
+  const bk = state.settings.bookkeeping || {};
+  assert.ok(bk.defaultAccountId, '首个账户应设为默认账户');
+  assert.strictEqual(bk.defaultAccountId, state.accounts[0].id, '默认账户 id 应与新账户一致');
 });

@@ -111,3 +111,35 @@ test('calcStats 逾期与已完成统计', function () {
   assert.strictEqual(s.overdue, 1);       // t2 已过期且未完成
   assert.strictEqual(s.completedTotal, 1); // t1 已完成
 });
+
+test('formatRemind 提前量文案（分钟/小时/天）', function () {
+  assert.strictEqual(Utils.formatRemind(0), '不提醒');
+  assert.strictEqual(Utils.formatRemind(-1), '不提醒');
+  assert.strictEqual(Utils.formatRemind(5), '提前 5 分钟');
+  assert.strictEqual(Utils.formatRemind(30), '提前 30 分钟');
+  assert.strictEqual(Utils.formatRemind(60), '提前 1 小时');
+  assert.strictEqual(Utils.formatRemind(120), '提前 2 小时');
+  assert.strictEqual(Utils.formatRemind(720), '提前 12 小时');
+  assert.strictEqual(Utils.formatRemind(1440), '提前 1 天');
+  assert.strictEqual(Utils.formatRemind(2880), '提前 2 天');
+});
+
+test('remindAt 指定时间提醒校验', function () {
+  const ts = Date.now();
+  assert.strictEqual(Utils.validateTodo({ title: 'x', remindAt: ts }).ok, true);
+  assert.strictEqual(Utils.validateTodo({ title: 'x', remindAt: 'abc' }).ok, false);
+  assert.strictEqual(Utils.validateTodo({ title: 'x', remindAt: 0 }).ok, false);
+  assert.strictEqual(Utils.validateTodo({ title: 'x', remindAt: null }).ok, true); // 未设置不校验
+  assert.strictEqual(Utils.validateEvent({ title: 'x', allDay: true, remindAt: ts }).ok, true);
+  assert.strictEqual(Utils.validateEvent({ title: 'x', allDay: true, remindAt: 'abc' }).ok, false);
+});
+
+test('effectiveReminds 优先 reminds 数组，回退 remindBefore，过滤非法值', function () {
+  assert.deepStrictEqual(Utils.effectiveReminds({ reminds: [60, 15] }), [60, 15]);
+  assert.deepStrictEqual(Utils.effectiveReminds({ reminds: [60, 0, -1, 'x', 15, 60] }), [60, 15]); // 去重 + 过滤
+  assert.deepStrictEqual(Utils.effectiveReminds({ reminds: [] }), []); // 空数组回退 remindBefore
+  assert.deepStrictEqual(Utils.effectiveReminds({ remindBefore: 30 }), [30]);
+  assert.deepStrictEqual(Utils.effectiveReminds({ remindBefore: 0 }), []);
+  assert.deepStrictEqual(Utils.effectiveReminds({}), []);
+  assert.strictEqual(Utils.effectiveReminds(null).length, 0);
+});

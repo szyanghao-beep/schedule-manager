@@ -80,23 +80,40 @@ export async function scheduleReminders() {
     const now = Date.now();
     const horizon = now + HORIZON_DAYS * 24 * 3600 * 1000;
 
-    // 待办：deadline - remindBefore
+    // 待办：deadline - 每条提前量（reminds 数组 / 旧 remindBefore）
     store.getRecords(sync.ENTITY_TYPES.TODO).forEach(function (t) {
-      if (t.status === 'done' || t.deadline == null || !t.remindBefore) return;
-      const remindAt = t.deadline - t.remindBefore * 60000;
-      if (remindAt <= now || t.deadline > horizon) return;
-      trigger({ id: 'todo:' + t.id, title: t.title, body: '截止于 ' + utils.toDateTimeStr(t.deadline), at: remindAt });
+      if (t.status === 'done' || t.deadline == null) return;
+      utils.effectiveReminds(t).forEach(function (rb) {
+        const remindAt = t.deadline - rb * 60000;
+        if (remindAt <= now || t.deadline > horizon) return;
+        trigger({ id: 'todo:' + t.id + ':' + rb, title: t.title, body: '截止于 ' + utils.toDateTimeStr(t.deadline), at: remindAt });
+      });
     });
 
-    // 日程：每个重复实例 startTime - remindBefore（限未来 7 天）
+    // 日程：每个重复实例 startTime - 每条提前量（限未来 7 天）
     store.getRecords(sync.ENTITY_TYPES.EVENT).forEach(function (e) {
-      if (!e.remindBefore) return;
+      const reminds = utils.effectiveReminds(e);
+      if (!reminds.length) return;
       utils.expandOccurrences(e, { from: now, to: horizon, limit: 100 }).forEach(function (occ) {
-        const remindAt = occ.startTime - e.remindBefore * 60000;
-        if (remindAt <= now) return;
-        const body = e.allDay ? '全天 · ' + utils.toDateStr(occ.startTime) : '开始于 ' + utils.toDateTimeStr(occ.startTime);
-        trigger({ id: 'event:' + occ.key, title: e.title, body: body, at: remindAt });
+        reminds.forEach(function (rb) {
+          const remindAt = occ.startTime - rb * 60000;
+          if (remindAt <= now) return;
+          const body = e.allDay ? '全天 · ' + utils.toDateStr(occ.startTime) : '开始于 ' + utils.toDateTimeStr(occ.startTime);
+          trigger({ id: 'event:' + occ.key + ':' + rb, title: e.title, body: body, at: remindAt });
+        });
       });
+    });
+
+    // 指定时间点提醒（remindAt，绝对时间戳）
+    store.getRecords(sync.ENTITY_TYPES.TODO).forEach(function (t) {
+      if (t.status === 'done' || t.remindAt == null) return;
+      if (t.remindAt <= now || t.remindAt > horizon) return;
+      trigger({ id: 'todo:at:' + t.id, title: t.title, body: '指定时间提醒', at: t.remindAt });
+    });
+    store.getRecords(sync.ENTITY_TYPES.EVENT).forEach(function (e) {
+      if (e.remindAt == null) return;
+      if (e.remindAt <= now || e.remindAt > horizon) return;
+      trigger({ id: 'event:at:' + e.id, title: e.title, body: '指定时间提醒', at: e.remindAt });
     });
   } catch (e) {
     console.warn('[notify] 排程失败', e);

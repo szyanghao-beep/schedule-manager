@@ -46,7 +46,7 @@ const IMPORTANCE_OPTIONS = [
 ];
 const REMIND_OPTIONS_CHIPS = REMIND_OPTIONS.map((m) => ({
   value: m,
-  label: m === 0 ? '不提醒' : m + ' 分钟',
+  label: utils.formatRemind(m),
 }));
 const ESTIMATED_OPTIONS = [
   { value: null, label: '不设定' },
@@ -93,8 +93,14 @@ export default function TodoForm() {
   const [repeatEndText, setRepeatEndText] = useState(
     editing && editing.repeat && editing.repeat.endDate ? utils.toDateStr(editing.repeat.endDate) : ''
   );
-  const [remindBefore, setRemindBefore] = useState(
-    editing ? (editing.remindBefore != null ? editing.remindBefore : 0) : 0
+  const [reminds, setReminds] = useState(
+    editing ? utils.effectiveReminds(editing) : []
+  );
+  const [remindAtDateText, setRemindAtDateText] = useState(
+    editing && editing.remindAt ? utils.toDateStr(editing.remindAt) : ''
+  );
+  const [remindAtTimeText, setRemindAtTimeText] = useState(
+    editing && editing.remindAt ? utils.toTimeStr(editing.remindAt) : ''
   );
   const [category, setCategory] = useState(() => {
     if (editing && editing.categoryId) {
@@ -110,6 +116,17 @@ export default function TodoForm() {
   });
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+
+  // 多选提醒：0（不提醒）清空；非 0 切换并排除 0
+  function toggleRemind(m) {
+    if (m === 0) { setReminds([]); return; }
+    setReminds(function (prev) {
+      const others = prev.filter(function (v) { return v > 0; });
+      return others.indexOf(m) >= 0
+        ? others.filter(function (v) { return v !== m; })
+        : others.concat([m]);
+    });
+  }
 
   // 组装输入并校验；返回 null 表示校验失败（错误已 setError）
   function buildInput() {
@@ -141,6 +158,24 @@ export default function TodoForm() {
       }
     }
 
+    let remindAt = null;
+    if (remindAtDateText.trim()) {
+      const atDateTs = formats.parseDateText(remindAtDateText);
+      if (atDateTs == null) {
+        setError('指定提醒日期格式应为 YYYY-MM-DD');
+        return null;
+      }
+      let atMin = 9 * 60;
+      if (remindAtTimeText.trim()) {
+        atMin = formats.parseTimeText(remindAtTimeText);
+        if (atMin == null) {
+          setError('指定提醒时间格式应为 HH:mm');
+          return null;
+        }
+      }
+      remindAt = atDateTs + atMin * 60000;
+    }
+
     const input = {
       title: title.trim(),
       description: description.trim(),
@@ -151,7 +186,9 @@ export default function TodoForm() {
       categoryName: category.name,
       categoryColor: category.color,
       repeat: { type: repeatType, interval: isNaN(interval) || interval < 1 ? 1 : interval, endDate },
-      remindBefore,
+      reminds,
+      remindBefore: reminds.length ? Math.min.apply(null, reminds) : 0,
+      remindAt,
       estimatedMinutes,
     };
 
@@ -268,8 +305,37 @@ export default function TodoForm() {
           </View>
         ) : null}
 
-        <Text style={styles.label}>提前提醒</Text>
-        <ChipGroup options={REMIND_OPTIONS_CHIPS} value={remindBefore} onChange={setRemindBefore} />
+        <Text style={styles.label}>提前提醒（可多选）</Text>
+        <ChipGroup
+          multi
+          options={REMIND_OPTIONS_CHIPS}
+          value={reminds.length ? reminds : [0]}
+          onChange={toggleRemind}
+        />
+
+        <Text style={styles.label}>指定时间提醒（可选，YYYY-MM-DD HH:mm）</Text>
+        <View style={styles.timeRow}>
+          <View style={styles.timeCol}>
+            <TextInput
+              style={styles.input}
+              value={remindAtDateText}
+              onChangeText={setRemindAtDateText}
+              placeholder="2024-01-01"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+          <View style={styles.timeCol}>
+            <TextInput
+              style={styles.input}
+              value={remindAtTimeText}
+              onChangeText={setRemindAtTimeText}
+              placeholder="09:00"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+          </View>
+        </View>
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 

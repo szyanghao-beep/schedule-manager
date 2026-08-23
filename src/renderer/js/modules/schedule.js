@@ -9,6 +9,7 @@ window.Modules.schedule = (function () {
   const clear = window.Dom.clear;
   const H = window.Helpers;
   const Utils = window.Utils;
+  const LunarUtil = window.LunarUtil || null; // 农历/节气/节假日（缺失时日历仍可用，仅无增强标注）
   const DAY_MS = 86400000;
   const WEEKDAY = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 
@@ -104,13 +105,23 @@ window.Modules.schedule = (function () {
         }
       });
     });
-    // 待办提醒：未完成、有截止时间且设置了提醒（remindBefore > 0）的待办，
+    // 待办提醒：未完成、有截止时间且设置了提醒（reminds 数组 / 旧 remindBefore）的待办，
     // 在「截止时间 - 提前分钟」处生成一条提醒，与日程同步展示。
     Store.get().todos.forEach(function (t) {
-      if (t.status === 'done') return;
-      if (t.deadline == null || !t.remindBefore) return;
-      const remindAt = t.deadline - t.remindBefore * 60 * 1000;
-      if (remindAt >= from && remindAt < to) items.push({ kind: 'todo', todo: t, remindAt: remindAt, startTime: remindAt });
+      if (t.status === 'done' || t.deadline == null) return;
+      Utils.effectiveReminds(t).forEach(function (rb) {
+        const remindAt = t.deadline - rb * 60 * 1000;
+        if (remindAt >= from && remindAt < to) items.push({ kind: 'todo', todo: t, remindAt: remindAt, startTime: remindAt });
+      });
+    });
+    // 指定时间点提醒（remindAt）：待办与日程各自生成一条独立提醒，在提醒时间点展示
+    Store.get().todos.forEach(function (t) {
+      if (t.status === 'done' || t.remindAt == null) return;
+      if (t.remindAt >= from && t.remindAt < to) items.push({ kind: 'todo', todo: t, remindAt: t.remindAt, startTime: t.remindAt });
+    });
+    Store.get().events.forEach(function (e) {
+      if (e.remindAt == null) return;
+      if (e.remindAt >= from && e.remindAt < to) items.push({ kind: 'remind', title: e.title, remindAt: e.remindAt, startTime: e.remindAt });
     });
     items.sort(function (a, b) { return a.startTime - b.startTime; });
     return items;
@@ -123,6 +134,66 @@ window.Modules.schedule = (function () {
       (byDay[d] = byDay[d] || []).push(x);
     });
     return byDay;
+  }
+
+  // ---------- 农历 / 节气 / 节假日标注（A1–A3，可开关） ----------
+  function calendarSettings() {
+    return (Store.get().settings && Store.get().settings.calendar) || {};
+  }
+
+  // 自定义节假日覆盖（A5 新年度导入），优先于内置数据
+  function holidayOverrides() {
+    return (Store.get().settings && Store.get().settings.holidayData) || null;
+  }
+
+  // 月视图单元格的农历/节气/节假日徽标（返回 [{cls, text}]）
+  function calendarBadges(dayTs) {
+    const out = [];
+    if (!LunarUtil) return out;
+    const cs = calendarSettings();
+    const wantLunar = cs.showLunar !== false;
+    const wantTerm = cs.showSolarTerms !== false;
+    const wantHoliday = cs.showHolidays !== false;
+    if (!wantLunar && !wantTerm && !wantHoliday) return out;
+    const lun = (wantLunar || wantTerm) ? LunarUtil.solarToLunar(dayTs) : null;
+    if (lun && wantLunar) out.push({ cls: 'cal-lunar', text: lun.day === 1 ? lun.monthCn + '月' : lun.dayCn });
+    if (lun && wantTerm && lun.jieQi) out.push({ cls: 'cal-term', text: lun.jieQi });
+    if (wantHoliday) {
+      const h = LunarUtil.getHoliday(dayTs, holidayOverrides());
+      if (h) out.push({ cls: 'cal-holiday ' + (h.isWork ? 'work' : 'rest'), text: h.isWork ? '班' : '休' });
+    }
+    return out;
+  }
+
+  // 周视图单行农历/节气/节假日摘要
+  function lunarLine(dayTs) {
+    if (!LunarUtil) return '';
+    const cs = calendarSettings();
+    const parts = [];
+    const lun = LunarUtil.solarToLunar(dayTs);
+    if (cs.showLunar !== false) parts.push(lun.day === 1 ? lun.monthCn + '月' : lun.dayCn);
+    if (cs.showSolarTerms !== false && lun.jieQi) parts.push(lun.jieQi);
+    if (cs.showHolidays !== false) {
+      const h = LunarUtil.getHoliday(dayTs, holidayOverrides());
+      if (h) parts.push(h.isWork ? '班' : '休');
+    }
+    return parts.join('·');
+  }
+
+  // 日视图头部农历信息（含节气名、法定节日名）
+  function dayHeader(ts) {
+    if (!LunarUtil) return null;
+    const cs = calendarSettings();
+    const parts = [];
+    const lun = LunarUtil.solarToLunar(ts);
+    if (cs.showLunar !== false) parts.push(lun.monthCn + '月' + lun.dayCn);
+    if (cs.showSolarTerms !== false && lun.jieQi) parts.push(lun.jieQi);
+    if (cs.showHolidays !== false) {
+      const h = LunarUtil.getHoliday(ts, holidayOverrides());
+      if (h) parts.push(h.name + (h.isWork ? '（调休上班）' : '（休）'));
+    }
+    if (!parts.length) return null;
+    return el('div', 'day-lunar', parts.join(' · '));
   }
 
   // ---------- 月视图 ----------
@@ -151,9 +222,9 @@ window.Modules.schedule = (function () {
     if (d.getMonth() !== new Date(monthStart).getMonth()) cell.classList.add('other');
     if (Utils.isSameDay(dayTs, Date.now())) cell.classList.add('today');
     cell.appendChild(el('div', 'cal-date', String(d.getDate())));
+    calendarBadges(dayTs).forEach(function (b) { cell.appendChild(el('div', b.cls, b.text)); });
     const list = byDay[Utils.toDateStr(dayTs)] || [];
-    list.slice(0, 3).forEach(function (x) { cell.appendChild(itemChip(x)); });
-    if (list.length > 3) cell.appendChild(el('div', 'cal-event more', '+' + (list.length - 3) + ' 更多'));
+    list.forEach(function (x) { cell.appendChild(itemChip(x)); });
     cell.addEventListener('click', function () { anchor = dayTs; viewMode = 'day'; render(); });
     return cell;
   }
@@ -182,6 +253,8 @@ window.Modules.schedule = (function () {
     head.appendChild(el('span', 'dnum', String(d.getDate())));
     head.appendChild(document.createTextNode(WEEKDAY[(d.getDay() + 6) % 7]));
     col.appendChild(head);
+    const line = lunarLine(dayTs);
+    if (line) col.appendChild(el('div', 'week-lunar', line));
     const list = byDay[Utils.toDateStr(dayTs)] || [];
     list.forEach(function (x) { col.appendChild(itemChip(x)); });
     col.addEventListener('click', function () { anchor = dayTs; viewMode = 'day'; render(); });
@@ -194,9 +267,11 @@ window.Modules.schedule = (function () {
     const items = collectItems(dayStart, Utils.addDays(dayStart, 1));
     const allDay = items.filter(function (x) { return x.kind === 'event' && x.ev.allDay; });
     const timed = items.filter(function (x) { return x.kind === 'event' && !x.ev.allDay; });
-    const reminders = items.filter(function (x) { return x.kind === 'todo'; });
+    const reminders = items.filter(function (x) { return x.kind === 'todo' || x.kind === 'remind'; });
 
     const list = el('div', 'day-list');
+    const header = dayHeader(anchor);
+    if (header) list.appendChild(header);
     if (allDay.length) {
       list.appendChild(el('div', 'day-section-title', '全天'));
       allDay.forEach(function (x) { list.appendChild(dayItem(x.ev, x.occ)); });
@@ -207,7 +282,7 @@ window.Modules.schedule = (function () {
     }
     if (reminders.length) {
       list.appendChild(el('div', 'day-section-title', '提醒'));
-      reminders.forEach(function (x) { list.appendChild(todoDayItem(x.todo, x.remindAt)); });
+      reminders.forEach(function (x) { list.appendChild(x.kind === 'todo' ? todoDayItem(x.todo, x.remindAt) : remindDayItem(x)); });
     }
     if (!items.length) list.appendChild(el('div', 'placeholder', '当天无日程'));
     return list;
@@ -258,6 +333,18 @@ window.Modules.schedule = (function () {
     return row;
   }
 
+  // 日程「指定时间提醒」的日视图条目（纯展示）
+  function remindDayItem(x) {
+    const row = el('div', 'day-item day-item-todo');
+    const time = el('div', 'day-item-time', '⏰ ' + Utils.toTimeStr(x.remindAt));
+    const main = el('div', 'item-main');
+    main.appendChild(el('div', 'item-title', x.title));
+    main.appendChild(el('div', 'item-meta', '指定时间提醒'));
+    row.appendChild(time);
+    row.appendChild(main);
+    return row;
+  }
+
   function eventChip(ev, occ) {
     const chip = el('div', 'cal-event');
     chip.style.background = ev.categoryColor || '#4f8ef7';
@@ -268,9 +355,19 @@ window.Modules.schedule = (function () {
     return chip;
   }
 
-  // 月/周视图条目分派：待办提醒用专属样式
+  // 月/周视图条目分派：待办提醒/指定时间提醒用专属样式
   function itemChip(x) {
+    if (x.kind === 'remind') return remindChip(x);
     return x.kind === 'todo' ? todoChip(x.todo, x.remindAt) : eventChip(x.ev, x.occ);
+  }
+
+  // 日程的「指定时间提醒」芯片（纯展示）
+  function remindChip(x) {
+    const chip = el('div', 'cal-event cal-event-todo');
+    chip.style.background = '#8e6fd8';
+    chip.textContent = '⏰ ' + Utils.toTimeStr(x.remindAt) + ' ' + x.title;
+    chip.title = '指定时间提醒：' + x.title;
+    return chip;
   }
 
   function todoChip(t, remindAt) {
@@ -463,14 +560,31 @@ window.Modules.schedule = (function () {
     repeatSelect.dataset.field = 'repeatType';
     repeatRow.appendChild(repeatSelect);
     row3.appendChild(repeatRow);
+    body.appendChild(row3);
 
     const remindRow = el('div', 'form-row');
-    remindRow.appendChild(el('label', null, '提醒'));
-    const remindSelect = H.select(C.REMIND_OPTIONS, function (m) { return m === 0 ? '不提醒' : '提前 ' + m + ' 分钟'; }, ev ? (ev.remindBefore || 0) : Store.get().settings.defaultRemindBefore);
-    remindSelect.dataset.field = 'remindBefore';
-    remindRow.appendChild(remindSelect);
-    row3.appendChild(remindRow);
-    body.appendChild(row3);
+    remindRow.appendChild(el('label', null, '提醒（可多选）'));
+    const defaultReminds = ev
+      ? Utils.effectiveReminds(ev)
+      : (Store.get().settings.defaultRemindBefore > 0 ? [Store.get().settings.defaultRemindBefore] : []);
+    remindRow.appendChild(H.remindGroup(defaultReminds));
+    body.appendChild(remindRow);
+
+    const remindAtRow = el('div', 'form-row');
+    remindAtRow.appendChild(el('label', null, '指定时间提醒（可选）'));
+    const remindAtGrid = el('div', 'form-grid');
+    const remindAtDate = el('input');
+    remindAtDate.type = 'date'; remindAtDate.dataset.field = 'remindAtDate';
+    const remindAtTime = el('input');
+    remindAtTime.type = 'time'; remindAtTime.dataset.field = 'remindAtTime';
+    if (ev && ev.remindAt) {
+      remindAtDate.value = Utils.toDateStr(ev.remindAt);
+      remindAtTime.value = Utils.toTimeStr(ev.remindAt);
+    }
+    remindAtGrid.appendChild(remindAtDate);
+    remindAtGrid.appendChild(remindAtTime);
+    remindAtRow.appendChild(remindAtGrid);
+    body.appendChild(remindAtRow);
 
     const intervalRow = el('div', 'form-row');
     intervalRow.appendChild(el('label', null, '自定义周期（天）'));
@@ -519,6 +633,7 @@ window.Modules.schedule = (function () {
           startTime = Utils.parseDateTime(d.startDate, d.startTime);
           endTime = Utils.parseDateTime(d.endDate, d.endTime);
         }
+        const reminds = H.remindValues(body);
         const input = {
           title: d.title.trim(),
           description: d.description.trim(),
@@ -528,7 +643,9 @@ window.Modules.schedule = (function () {
           priority: d.priority,
           categoryId: d.categoryId,
           repeat: H.buildRepeat(d),
-          remindBefore: Number(d.remindBefore),
+          reminds: reminds,
+          remindBefore: reminds.length ? Math.min.apply(null, reminds) : 0,
+          remindAt: d.remindAtDate ? Utils.parseDateTime(d.remindAtDate, d.remindAtTime || '09:00') : null,
         };
         if (input.allDay && input.endTime < input.startTime) { window.Toast.error('结束日期不能早于开始日期'); return false; }
         const v = Utils.validateEvent(input);

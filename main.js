@@ -10,12 +10,24 @@ const Utils = require('./shared/utils.js');
 const constants = require('./shared/constants.js');
 const { DATA_VERSION, migrateData } = require('./shared/migrate.js');
 const sync = require('./shared/sync.js');
+const nodemailer = require('nodemailer');
+const { buildDailyDigest, shouldSendDailyEmail } = require('./shared/digest.js');
+const LunarUtil = require('./shared/lunar.js');
+const aiIndex = require('./ai/index.js');
+
+// 测试/冒烟隔离：设置 SCHEDULE_USER_DATA_DIR 可覆盖用户数据目录，避免污染真实数据。
+// 生产运行不设此变量，行为不变。必须在首次 app.getPath('userData') 前设置。
+if (process.env.SCHEDULE_USER_DATA_DIR) {
+  app.setPath('userData', process.env.SCHEDULE_USER_DATA_DIR);
+}
 
 const DATA_FILE = 'data.json';
 const BACKUP_DIR = 'backup';
 const MAX_BACKUPS = 10;
 const REMINDER_INTERVAL = 30 * 1000; // 每 30s 扫描一次提醒
 const SYNC_STATE_FILE = 'sync-state.json'; // 同步登录态与游标（独立于 data.json）
+const EMAIL_SECRET_FILE = 'email-secret.json'; // SMTP 密码（safeStorage 加密，独立于 data.json）
+const AI_SECRET_FILE = 'ai-secret.json'; // AI API key（safeStorage 加密，独立于 data.json）
 const SETTINGS_ID = 'settings'; // 同步的 settings 记录 id（共享偏好：四象限阈值/默认提醒）
 
 let mainWindow = null;
@@ -27,6 +39,9 @@ let tray = null;        // 系统托盘
 let isQuitting = false; // 真正退出中（关闭窗口不再拦截为最小化）
 let trayHintShown = false; // 首次最小化到托盘的提示只弹一次
 let syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 }; // 同步配置与游标
+let emailSecret = { password: '' }; // SMTP 授权码/密码（仅内存 + 加密落盘）
+let emailSending = false; // 发送中防重入（避免 30s 轮询期间重复发送）
+let aiSecret = { apiKey: '' }; // AI API key（仅内存 + 加密落盘）
 
 // ---------- 路径 ----------
 function dataFilePath() { return path.join(app.getPath('userData'), DATA_FILE); }
@@ -42,10 +57,25 @@ function defaultData() {
     categories: categories,
     events: [],
     todos: [],
-    settings: { defaultRemindBefore: 15, urgentThresholdHours: 24, theme: 'system' },
+    settings: {
+      defaultRemindBefore: 15, urgentThresholdHours: 24, theme: 'system',
+      emailReminder: { enabled: false, time: '08:00', to: '' }, // 每日邮件摘要开关/时间/收件人
+      emailSmtp: { host: '', port: 465, secure: true, user: '', fromName: '' }, // SMTP 服务器配置（密码另存）
+      ai: { enabled: false, provider: 'ollama', endpoint: 'http://localhost:11434/v1', model: 'qwen2.5:7b' }, // AI 自然语言（API key 另存）
+      calendar: Object.assign({}, constants.CALENDAR_DEFAULTS), // 农历/节气/节假日/休息日影响规划开关
+      bookkeeping: Object.assign({}, constants.BOOKKEEPING_DEFAULTS), // 记账默认账户/币种
+      holidayData: {}, // 自定义节假日覆盖（'YYYY-MM-DD' -> { name, isWork }），新年度手动导入（A5）
+    },
     settingsMeta: { updatedAt: 0, localModifiedAt: 0 }, // settings 同步游标（theme 为设备本地偏好不同步）
     statsHistory: [], // 每日四象限分布快照：{ date, q1..q4, total }
+    accounts: [], // 2.3.0 记账账户
+    transactions: [], // 2.3.0 收支流水
+    bookkeepingCategories: [], // 2.3.0 记账分类（独立于日程分类）
+    budgets: [], // 2.3.0 预算
+    memorials: [], // 2.3.0 生日/纪念日
     notified: {}, // key(occurrence) -> 通知时间戳，用于去重
+    snoozed: {}, // key -> { kind, id, title, at }，稍后提醒（到点重弹）
+    emailLastSentDate: '', // 每日邮件上次发送日期（YYYY-MM-DD），用于当天去重
   };
 }
 
@@ -58,6 +88,16 @@ function loadData() {
     data = Object.assign(defaultData(), parsed);
     // 深度合并 settings，确保新增默认字段（如 urgentThresholdHours）在旧数据上也能生效
     data.settings = Object.assign(defaultData().settings, parsed.settings || {});
+    // 深度合并 email 子对象，避免旧数据缺字段时丢失默认值
+    data.settings.emailReminder = Object.assign(defaultData().settings.emailReminder, data.settings.emailReminder || {});
+    data.settings.emailSmtp = Object.assign(defaultData().settings.emailSmtp, data.settings.emailSmtp || {});
+    data.settings.ai = Object.assign(defaultData().settings.ai, data.settings.ai || {});
+    data.settings.calendar = Object.assign(defaultData().settings.calendar, data.settings.calendar || {});
+    data.settings.bookkeeping = Object.assign(defaultData().settings.bookkeeping, data.settings.bookkeeping || {});
+    if (!data.settings.holidayData || typeof data.settings.holidayData !== 'object' || Array.isArray(data.settings.holidayData)) {
+      data.settings.holidayData = {};
+    }
+    if (typeof data.emailLastSentDate !== 'string') data.emailLastSentDate = '';
     if (!data.settingsMeta || typeof data.settingsMeta !== 'object') {
       data.settingsMeta = { updatedAt: 0, localModifiedAt: 0 };
     }
@@ -134,27 +174,78 @@ function publicData() {
     todos: data.todos,
     settings: data.settings,
     statsHistory: data.statsHistory || [],
+    accounts: data.accounts || [],
+    transactions: data.transactions || [],
+    bookkeepingCategories: data.bookkeepingCategories || [],
+    budgets: data.budgets || [],
+    memorials: data.memorials || [],
   };
 }
 
 // ---------- 提醒 ----------
-function buildReminderBody(kind, item, occ) {
-  if (kind === 'todo') return '截止于 ' + Utils.toDateTimeStr(occ.startTime) + ' · 提前 ' + item.remindBefore + ' 分钟提醒';
+function buildReminderBody(kind, item, occ, mode, remindBefore) {
+  if (mode === 'at') {
+    const anchor = kind === 'todo' ? item.deadline : item.startTime;
+    return '指定时间提醒' + (anchor != null ? ' · ' + Utils.toDateTimeStr(anchor) : '');
+  }
+  const advance = Utils.formatRemind(remindBefore != null ? remindBefore : item.remindBefore);
+  if (kind === 'todo') return '截止于 ' + Utils.toDateTimeStr(occ.startTime) + ' · ' + advance;
   const time = item.allDay ? '全天' : '开始于 ' + Utils.toDateTimeStr(occ.startTime);
-  return time + ' · 提前 ' + item.remindBefore + ' 分钟提醒';
+  return time + ' · ' + advance;
 }
 
-function showNotification(kind, item, occ) {
+function showNotification(kind, item, occ, mode, remindBefore) {
   if (!Notification.isSupported()) return;
-  const n = new Notification({ title: item.title, body: buildReminderBody(kind, item, occ) });
+  const n = new Notification({ title: item.title, body: buildReminderBody(kind, item, occ, mode, remindBefore) });
   n.on('click', function () {
-    if (mainWindow) { mainWindow.show(); mainWindow.focus(); }
+    showMainWindow();
+    // 点击通知 -> 通知渲染进程定位并弹出操作条（完成 / 稍后）
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('reminder-action', { entityType: kind, id: item.id, title: item.title });
+    }
   });
   n.show();
   // 通知渲染进程高亮/刷新
   if (mainWindow && mainWindow.webContents) {
     mainWindow.webContents.send('reminder', { id: item.id, key: occ.key });
   }
+}
+
+// ---------- 纪念日提醒（A4） ----------
+// 按「下一次发生日期」提前 remindBeforeDays 天提醒一次（农历生日经 lunarDateToSolar 换算）。
+function showMemorialNotification(m, occ) {
+  if (!Notification.isSupported()) return;
+  const kindLabel = constants.MEMORIAL_KIND_LABEL[m.kind] || '纪念日';
+  const remain = LunarUtil.countdownDays(occ.ts, Date.now());
+  const parts = [kindLabel];
+  if (m.name) parts.push(m.name);
+  if (occ.age != null) parts.push(occ.age + ' 岁');
+  parts.push(remain > 0 ? '还有 ' + remain + ' 天' : '就在今天');
+  const n = new Notification({ title: '纪念日提醒', body: parts.join(' · ') });
+  n.on('click', function () { showMainWindow(); });
+  n.show();
+}
+
+function checkMemorialReminders(now) {
+  if (!Array.isArray(data.memorials)) return;
+  const DAY = 24 * 3600 * 1000;
+  data.memorials.forEach(function (m) {
+    if (!m || m.deleted) return;
+    const advance = Number(m.remindBeforeDays);
+    if (!isFinite(advance) || advance <= 0) return; // 0 或未设置 = 不提醒
+    const occ = LunarUtil.nextMemorialOccurrence(m, now);
+    if (!occ) return;
+    const remindAt = occ.ts - advance * DAY;
+    // 提醒窗口：[occ.ts - advance 天, occ.ts + 1 天)；每年每纪念日只提醒一次（按发生日期去重）
+    if (now >= remindAt && now < occ.ts + DAY) {
+      const key = 'memorial:' + m.id + ':' + occ.ts;
+      if (!data.notified[key]) {
+        data.notified[key] = now;
+        showMemorialNotification(m, occ);
+        scheduleSave();
+      }
+    }
+  });
 }
 
 function checkReminders() {
@@ -170,21 +261,62 @@ function checkReminders() {
 
   list.forEach(function (entry) {
     const item = entry.item;
-    const remindBefore = item.remindBefore || 0;
-    if (!remindBefore || entry.startTime == null) return;
-    // 归一化：待办用 deadline 作为基准时间展开重复
-    const norm = {
-      id: item.id, startTime: entry.startTime, endTime: entry.endTime,
-      repeat: item.repeat, allDay: item.allDay, exceptions: item.exceptions,
-    };
-    Utils.expandOccurrences(norm, { from: now, to: now + remindBefore * 60 * 1000 + 60 * 1000 }).forEach(function (occ) {
-      const remindAt = occ.startTime - remindBefore * 60 * 1000;
-      if (now >= remindAt && now < occ.startTime && !data.notified[occ.key]) {
-        data.notified[occ.key] = now;
-        showNotification(entry.kind, item, occ);
+
+    // 提前量提醒（reminds 数组，兼容旧 remindBefore；相对截止/开始时间）
+    const reminds = Utils.effectiveReminds(item);
+    if (reminds.length && entry.startTime != null) {
+      // 归一化：待办用 deadline 作为基准时间展开重复
+      const norm = {
+        id: item.id, startTime: entry.startTime, endTime: entry.endTime,
+        repeat: item.repeat, allDay: item.allDay, exceptions: item.exceptions,
+      };
+      const maxBefore = Math.max.apply(null, reminds); // 展开窗口取最远提前量
+      Utils.expandOccurrences(norm, { from: now, to: now + maxBefore * 60 * 1000 + 60 * 1000 }).forEach(function (occ) {
+        reminds.forEach(function (remindBefore) {
+          const remindAt = occ.startTime - remindBefore * 60 * 1000;
+          const key = occ.key + ':' + remindBefore; // 去重键含提前量，避免同一实例多条提醒互相覆盖
+          if (now >= remindAt && now < occ.startTime && !data.notified[key]) {
+            data.notified[key] = now;
+            showNotification(entry.kind, item, occ, null, remindBefore);
+            scheduleSave();
+          }
+        });
+      });
+    }
+
+    // 指定时间点提醒（remindAt，绝对时间戳）；错过后 24h 内补发，超时则丢弃
+    const at = item.remindAt;
+    if (at != null) {
+      const key = item.id + '@at:' + at;
+      if (now >= at && now < at + 24 * 3600 * 1000 && !data.notified[key]) {
+        data.notified[key] = now;
+        showNotification(entry.kind, item, { key: key, startTime: at }, 'at');
         scheduleSave();
       }
-    });
+    }
+  });
+
+  // 纪念日提前提醒（A4）
+  checkMemorialReminders(now);
+
+  // 稍后提醒（snooze）：到点重新弹出一次
+  const snoozed = data.snoozed || {};
+  Object.keys(snoozed).forEach(function (key) {
+    const s = snoozed[key];
+    if (s && now >= s.at) {
+      if (Notification.isSupported()) {
+        const n = new Notification({ title: s.title || '稍后提醒', body: '稍后提醒 · ' + (s.kind === 'todo' ? '待办' : '日程') });
+        n.on('click', function () {
+          showMainWindow();
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send('reminder-action', { entityType: s.kind, id: s.id, title: s.title });
+          }
+        });
+        n.show();
+      }
+      delete snoozed[key];
+      scheduleSave();
+    }
   });
 }
 
@@ -259,6 +391,151 @@ function loadSyncState() {
   } catch (e) {
     // 首次运行或无状态，忽略
   }
+}
+
+// ---------- 邮件提醒 ----------
+function emailSecretPath() { return path.join(app.getPath('userData'), EMAIL_SECRET_FILE); }
+
+// SMTP 密码用系统安全存储加密落盘（独立于 data.json，避免随数据导出/同步泄露）
+function persistEmailSecret() {
+  try {
+    const toStore = { passwordEncrypted: '' };
+    if (emailSecret.password) {
+      if (safeStorage.isEncryptionAvailable()) {
+        toStore.passwordEncrypted = safeStorage.encryptString(emailSecret.password).toString('base64');
+      } else {
+        toStore.passwordEncrypted = 'plain:' + Buffer.from(emailSecret.password, 'utf-8').toString('base64');
+      }
+    }
+    fs.writeFileSync(emailSecretPath(), JSON.stringify(toStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('邮件密钥保存失败', e);
+  }
+}
+
+function loadEmailSecret() {
+  try {
+    const raw = fs.readFileSync(emailSecretPath(), 'utf-8');
+    const s = JSON.parse(raw);
+    if (s.passwordEncrypted) {
+      if (s.passwordEncrypted.startsWith('plain:')) {
+        emailSecret.password = Buffer.from(s.passwordEncrypted.slice(6), 'base64').toString('utf-8');
+      } else if (safeStorage.isEncryptionAvailable()) {
+        emailSecret.password = safeStorage.decryptString(Buffer.from(s.passwordEncrypted, 'base64'));
+      }
+    }
+  } catch (e) {
+    // 首次运行或无密码，忽略
+  }
+}
+
+// ---------- AI 密钥 ----------
+function aiSecretPath() { return path.join(app.getPath('userData'), AI_SECRET_FILE); }
+
+function persistAiSecret() {
+  try {
+    const toStore = { apiKeyEncrypted: '' };
+    if (aiSecret.apiKey) {
+      if (safeStorage.isEncryptionAvailable()) {
+        toStore.apiKeyEncrypted = safeStorage.encryptString(aiSecret.apiKey).toString('base64');
+      } else {
+        toStore.apiKeyEncrypted = 'plain:' + Buffer.from(aiSecret.apiKey, 'utf-8').toString('base64');
+      }
+    }
+    fs.writeFileSync(aiSecretPath(), JSON.stringify(toStore, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('AI 密钥保存失败', e);
+  }
+}
+
+function loadAiSecret() {
+  try {
+    const raw = fs.readFileSync(aiSecretPath(), 'utf-8');
+    const s = JSON.parse(raw);
+    if (s.apiKeyEncrypted) {
+      if (s.apiKeyEncrypted.startsWith('plain:')) {
+        aiSecret.apiKey = Buffer.from(s.apiKeyEncrypted.slice(6), 'base64').toString('utf-8');
+      } else if (safeStorage.isEncryptionAvailable()) {
+        aiSecret.apiKey = safeStorage.decryptString(Buffer.from(s.apiKeyEncrypted, 'base64'));
+      }
+    }
+  } catch (e) {
+    // 首次运行或无 key，忽略
+  }
+}
+
+function emailStatus() {
+  const er = data.settings.emailReminder || {};
+  const smtp = data.settings.emailSmtp || {};
+  return {
+    enabled: !!er.enabled,
+    time: er.time || '08:00',
+    to: er.to || '',
+    host: smtp.host || '',
+    port: smtp.port != null ? smtp.port : 465,
+    secure: smtp.secure !== false,
+    user: smtp.user || '',
+    fromName: smtp.fromName || '',
+    hasPassword: !!emailSecret.password,
+    lastSentDate: data.emailLastSentDate || '',
+  };
+}
+
+function smtpTransport() {
+  const smtp = data.settings.emailSmtp || {};
+  return nodemailer.createTransport({
+    host: smtp.host,
+    port: Number(smtp.port) || 465,
+    secure: smtp.secure !== false,
+    auth: { user: smtp.user, pass: emailSecret.password },
+  });
+}
+
+async function sendMail(opts) {
+  const smtp = data.settings.emailSmtp || {};
+  const fromName = smtp.fromName || '日程管理';
+  const transport = smtpTransport();
+  await transport.sendMail({
+    from: '"' + fromName + '" <' + smtp.user + '>',
+    to: opts.to,
+    subject: opts.subject,
+    text: opts.text,
+    html: opts.html,
+  });
+}
+
+// 每日邮件：到达配置时间且当天未发送过时，发送待办摘要
+function checkEmailReminder() {
+  if (!data) return;
+  const er = data.settings && data.settings.emailReminder;
+  const smtp = data.settings && data.settings.emailSmtp;
+  const now = Date.now();
+  if (!shouldSendDailyEmail({
+    enabled: er && er.enabled,
+    to: er && er.to,
+    host: smtp && smtp.host,
+    user: smtp && smtp.user,
+    hasPassword: !!emailSecret.password,
+    time: er && er.time,
+    now: now,
+    lastSentDate: data.emailLastSentDate,
+    sending: emailSending,
+  })) return;
+  const digest = buildDailyDigest(data, now);
+  const today = Utils.toDateStr(now);
+  emailSending = true;
+  sendMail({ to: er.to, subject: digest.subject, text: digest.text, html: digest.html })
+    .then(function () {
+      data.emailLastSentDate = today;
+      scheduleSave();
+      if (Notification.isSupported()) {
+        new Notification({ title: '日程管理', body: '每日待办邮件已发送' }).show();
+      }
+    })
+    .catch(function (e) {
+      console.error('每日邮件发送失败', e);
+    })
+    .finally(function () { emailSending = false; });
 }
 
 // settings 被本地修改：更新同步游标（theme 是设备本地偏好，不随此同步）
@@ -426,8 +703,19 @@ function applyImported(parsed) {
   data.events = parsed.events;
   data.todos = parsed.todos;
   data.settings = Object.assign(defaultData().settings, parsed.settings || {});
+  data.settings.emailReminder = Object.assign(defaultData().settings.emailReminder, data.settings.emailReminder || {});
+  data.settings.emailSmtp = Object.assign(defaultData().settings.emailSmtp, data.settings.emailSmtp || {});
+  data.settings.ai = Object.assign(defaultData().settings.ai, data.settings.ai || {});
+  data.settings.calendar = Object.assign(defaultData().settings.calendar, data.settings.calendar || {});
+  data.settings.bookkeeping = Object.assign(defaultData().settings.bookkeeping, data.settings.bookkeeping || {});
   data.statsHistory = Array.isArray(parsed.statsHistory) ? parsed.statsHistory : [];
+  data.accounts = Array.isArray(parsed.accounts) ? parsed.accounts : [];
+  data.transactions = Array.isArray(parsed.transactions) ? parsed.transactions : [];
+  data.bookkeepingCategories = Array.isArray(parsed.bookkeepingCategories) ? parsed.bookkeepingCategories : [];
+  data.budgets = Array.isArray(parsed.budgets) ? parsed.budgets : [];
+  data.memorials = Array.isArray(parsed.memorials) ? parsed.memorials : [];
   data.notified = {};
+  data.snoozed = {};
   data.version = DATA_VERSION;
   // 导入/恢复的数据标记为「本地修改」，使下次同步能上传（否则 extractLocalChanges 会因
   // 缺少 localModifiedAt 而跳过，导致导入的数据永远停留在本地）。
@@ -457,8 +745,18 @@ function registerIpc() {
       if (Array.isArray(payload.categories)) data.categories = payload.categories;
       if (Array.isArray(payload.events)) data.events = payload.events;
       if (Array.isArray(payload.todos)) data.todos = payload.todos;
+      if (Array.isArray(payload.accounts)) data.accounts = payload.accounts;
+      if (Array.isArray(payload.transactions)) data.transactions = payload.transactions;
+      if (Array.isArray(payload.bookkeepingCategories)) data.bookkeepingCategories = payload.bookkeepingCategories;
+      if (Array.isArray(payload.budgets)) data.budgets = payload.budgets;
+      if (Array.isArray(payload.memorials)) data.memorials = payload.memorials;
       if (payload.settings && typeof payload.settings === 'object') {
         const merged = Object.assign(defaultData().settings, payload.settings);
+        merged.emailReminder = Object.assign(defaultData().settings.emailReminder, payload.settings.emailReminder || {});
+        merged.emailSmtp = Object.assign(defaultData().settings.emailSmtp, payload.settings.emailSmtp || {});
+        merged.ai = Object.assign(defaultData().settings.ai, payload.settings.ai || {});
+        merged.calendar = Object.assign(defaultData().settings.calendar, payload.settings.calendar || {});
+        merged.bookkeeping = Object.assign(defaultData().settings.bookkeeping, payload.settings.bookkeeping || {});
         if (JSON.stringify(merged) !== JSON.stringify(data.settings)) {
           data.settings = merged;
           touchSettings(); // 共享偏好（阈值/默认提醒）变更也参与同步
@@ -527,6 +825,103 @@ function registerIpc() {
       new Notification({ title: opts.title, body: opts.body || '' }).show();
     }
     return true;
+  });
+
+  // 稍后提醒：把某条记录延迟 minutes 分钟后再弹一次通知（桌面端）
+  ipcMain.handle('reminder:snooze', function (e, opts) {
+    opts = opts || {};
+    const minutes = Number(opts.minutes) || 10;
+    const id = String(opts.id || '');
+    if (!id) return false;
+    let kind = 'event';
+    let rec = data.events.find(function (x) { return x.id === id; });
+    if (!rec) { rec = data.todos.find(function (x) { return x.id === id; }); kind = 'todo'; }
+    if (!data.snoozed) data.snoozed = {};
+    const at = Date.now() + minutes * 60 * 1000;
+    data.snoozed[id + '@snooze:' + at] = { kind: kind, id: id, title: rec ? rec.title : '提醒', at: at };
+    scheduleSave();
+    return true;
+  });
+
+  // ---------- 邮件提醒 IPC ----------
+  ipcMain.handle('email:save-settings', function (e, opts) {
+    opts = opts || {};
+    data.settings.emailReminder = Object.assign(
+      defaultData().settings.emailReminder, data.settings.emailReminder || {}, opts.reminder || {}
+    );
+    data.settings.emailSmtp = Object.assign(
+      defaultData().settings.emailSmtp, data.settings.emailSmtp || {}, opts.smtp || {}
+    );
+    // 密码仅当用户输入了新值时更新（留空表示保持原密码）
+    if (typeof opts.password === 'string' && opts.password !== '') {
+      emailSecret.password = opts.password;
+      persistEmailSecret();
+    }
+    scheduleSave();
+    return emailStatus();
+  });
+
+  ipcMain.handle('email:test', async function (e, opts) {
+    opts = opts || {};
+    const smtp = data.settings.emailSmtp || {};
+    const to = opts.to || (data.settings.emailReminder && data.settings.emailReminder.to);
+    if (!smtp.host || !smtp.user || !emailSecret.password) {
+      throw new Error('请先填写 SMTP 主机、用户名和密码');
+    }
+    if (!to) throw new Error('请填写收件邮箱');
+    await sendMail({
+      to: to,
+      subject: '日程管理 · 测试邮件',
+      text: '这是一封测试邮件，说明 SMTP 配置正确。',
+      html: '<p style="font-family:sans-serif">这是一封测试邮件，说明 SMTP 配置正确。</p>',
+    });
+    return true;
+  });
+
+  ipcMain.handle('email:status', function () { return emailStatus(); });
+
+  // ---------- AI（自然语言快速捕捉）IPC ----------
+  function aiStatus() {
+    const ai = data.settings.ai || {};
+    return {
+      enabled: !!ai.enabled,
+      provider: ai.provider || 'ollama',
+      endpoint: ai.endpoint || '',
+      model: ai.model || '',
+      hasApiKey: !!aiSecret.apiKey,
+    };
+  }
+
+  ipcMain.handle('ai:save-settings', function (e, opts) {
+    opts = opts || {};
+    data.settings.ai = Object.assign(defaultData().settings.ai, data.settings.ai || {}, opts.ai || {});
+    // API key 仅当用户输入了新值时更新（留空表示保持原 key）
+    if (typeof opts.apiKey === 'string' && opts.apiKey !== '') {
+      aiSecret.apiKey = opts.apiKey;
+      persistAiSecret();
+    }
+    scheduleSave();
+    return aiStatus();
+  });
+
+  ipcMain.handle('ai:status', function () { return aiStatus(); });
+
+  ipcMain.handle('ai:parse', function (e, opts) {
+    opts = opts || {};
+    const ai = data.settings.ai || {};
+    const categories = (data.categories || []).map(function (c) { return c.name; }).filter(Boolean);
+    return aiIndex.parseQuickCapture(String(opts.text || ''), {
+      ai: ai,
+      apiKey: aiSecret.apiKey,
+      categories: categories,
+      now: opts.now != null ? opts.now : Date.now(),
+    });
+  });
+
+  ipcMain.handle('ai:test', async function () {
+    const ai = data.settings.ai || {};
+    if (!ai.endpoint || !ai.model) throw new Error('请先填写 endpoint 和模型名');
+    return aiIndex.testConnection(ai, aiSecret.apiKey);
   });
 
   // ---------- 同步 IPC ----------
@@ -671,12 +1066,16 @@ app.whenReady().then(function () {
   if (process.platform === 'win32') app.setAppUserModelId('com.schedule.manager'); // Windows 通知/任务栏身份
   loadData();
   loadSyncState(); // 恢复上次的同步登录态与游标（token 已加密持久化）
+  loadEmailSecret(); // 恢复 SMTP 密码（已加密持久化）
+  loadAiSecret(); // 恢复 AI API key（已加密持久化）
   registerIpc();
   createWindow();
   createTray();
   registerQuickCapture(); // 全局快速捕捉快捷键
   checkReminders(); // 启动即查一次
+  checkEmailReminder(); // 启动即查一次每日邮件
   setInterval(checkReminders, REMINDER_INTERVAL);
+  setInterval(checkEmailReminder, REMINDER_INTERVAL);
   // 启动自动同步：已登录时稍作延迟（等渲染层加载完），先推后拉
   if (syncAuthed()) {
     setTimeout(function () {

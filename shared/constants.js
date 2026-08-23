@@ -47,8 +47,8 @@ const REPEAT_LABEL = {
   custom: '自定义',
 };
 
-// 提醒提前时间选项（分钟），0 表示不提醒
-const REMIND_OPTIONS = [0, 5, 10, 15, 30, 60];
+// 提醒提前时间选项（分钟），0 表示不提醒；含小时/天级（120/180/720/1440/2880）
+const REMIND_OPTIONS = [0, 5, 10, 15, 30, 60, 120, 180, 720, 1440, 2880];
 
 // 默认分类
 const DEFAULT_CATEGORIES = [
@@ -112,6 +112,37 @@ const WORK_HOURS = { start: 9, end: 18 };
 const SCHEDULE_SLOT_MINUTES = 30;
 const SCHEDULE_BUFFER_MINUTES = 5;
 
+// ---- 2.3.0：日历（农历/节气/节假日）----
+const CALENDAR_DEFAULTS = { showLunar: true, showSolarTerms: true, showHolidays: true, restDayAffectsPlanning: true };
+
+// ---- 2.3.0：收支记账 ----
+const BOOKKEEPING_DEFAULTS = { defaultAccountId: '', defaultCurrency: 'CNY' };
+
+const ACCOUNT_TYPES = ['cash', 'bank', 'credit', 'ewallet', 'investment', 'other'];
+const ACCOUNT_TYPE_LABEL = { cash: '现金', bank: '银行卡', credit: '信用卡', ewallet: '电子钱包', investment: '投资', other: '其他' };
+const ACCOUNT_ICON = { cash: '💵', bank: '🏦', credit: '💳', ewallet: '📱', investment: '📈', other: '🏷️' };
+
+const TXN_TYPES = ['expense', 'income', 'transfer'];
+const TXN_TYPE_LABEL = { expense: '支出', income: '收入', transfer: '转账' };
+
+// 记账二级分类默认值（独立于日程分类，决策 #1）；type 区分收入/支出
+const BOOKKEEPING_DEFAULT_CATEGORIES = [
+  { name: '餐饮', type: 'expense', color: '#e05b5b' },
+  { name: '交通', type: 'expense', color: '#4f8ef7' },
+  { name: '购物', type: 'expense', color: '#8e6fd8' },
+  { name: '居住', type: 'expense', color: '#4caf7d' },
+  { name: '娱乐', type: 'expense', color: '#f2a541' },
+  { name: '医疗', type: 'expense', color: '#4ec2c9' },
+  { name: '工资', type: 'income', color: '#4caf7d' },
+  { name: '奖金', type: 'income', color: '#4f8ef7' },
+  { name: '理财', type: 'income', color: '#8e6fd8' },
+  { name: '其他收入', type: 'income', color: '#8a8f98' },
+];
+
+// 纪念日种类
+const MEMORIAL_KINDS = ['birthday', 'anniversary', 'other'];
+const MEMORIAL_KIND_LABEL = { birthday: '生日', anniversary: '纪念日', other: '其他' };
+
 module.exports = {
   STATUS,
   STATUS_LABEL,
@@ -135,4 +166,14 @@ module.exports = {
   WORK_HOURS,
   SCHEDULE_SLOT_MINUTES,
   SCHEDULE_BUFFER_MINUTES,
+  CALENDAR_DEFAULTS,
+  BOOKKEEPING_DEFAULTS,
+  ACCOUNT_TYPES,
+  ACCOUNT_TYPE_LABEL,
+  ACCOUNT_ICON,
+  TXN_TYPES,
+  TXN_TYPE_LABEL,
+  BOOKKEEPING_DEFAULT_CATEGORIES,
+  MEMORIAL_KINDS,
+  MEMORIAL_KIND_LABEL,
 };

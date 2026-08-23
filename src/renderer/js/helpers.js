@@ -70,6 +70,47 @@ window.Helpers = (function () {
     return d.getTime();
   }
 
+  // 多条提醒复选组（0 = 不提醒，与其它互斥）；selected 为已选分钟数组
+  function remindGroup(selected) {
+    const selectedList = selected || [];
+    const box = el('div', 'remind-group');
+    const cbs = [];
+    C.REMIND_OPTIONS.forEach(function (m) {
+      const label = el('label', 'remind-option');
+      const cb = el('input');
+      cb.type = 'checkbox';
+      cb.value = m;
+      cb.checked = selectedList.indexOf(m) >= 0;
+      cbs.push(cb);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(' ' + window.Utils.formatRemind(m)));
+      box.appendChild(label);
+    });
+    cbs.forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        if (!cb.checked) return;
+        const isNone = Number(cb.value) === 0;
+        cbs.forEach(function (c) {
+          const cIsNone = Number(c.value) === 0;
+          if (cIsNone !== isNone) c.checked = false; // 勾选一类后取消另一类（0 与非 0 互斥）
+        });
+      });
+    });
+    return box;
+  }
+
+  // 读取复选组选中值（正数分钟）；勾选「不提醒」或全不选 -> []
+  function remindValues(root) {
+    const vals = [];
+    let none = false;
+    root.querySelectorAll('.remind-option input[type=checkbox]').forEach(function (cb) {
+      if (!cb.checked) return;
+      const v = Number(cb.value);
+      if (v === 0) none = true; else vals.push(v);
+    });
+    return none ? [] : vals;
+  }
+
   // 紧急阈值（毫秒）：截止前多少小时内视为「紧急」，可在设置中调整
   function urgentThresholdMs() {
     const h = Store.get().settings.urgentThresholdHours;
@@ -94,6 +135,8 @@ window.Helpers = (function () {
     buildRepeat: buildRepeat,
     badge: badge,
     addMonths: addMonths,
+    remindGroup: remindGroup,
+    remindValues: remindValues,
     urgentThresholdMs: urgentThresholdMs,
     quadrantBadge: quadrantBadge,
   };

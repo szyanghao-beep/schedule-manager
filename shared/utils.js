@@ -74,6 +74,41 @@
     return item.status === STATUS.DOING ? STATUS.DOING : STATUS.PENDING;
   }
 
+  // 提醒提前量 -> 可读文案：不提醒 / 提前 N 分钟 / 提前 N 小时 / 提前 N 天
+  function formatRemind(minutes) {
+    var m = Number(minutes);
+    if (!isFinite(m) || m <= 0) return '不提醒';
+    if (m < 60) return '提前 ' + m + ' 分钟';
+    if (m % 1440 === 0) return '提前 ' + (m / 1440) + ' 天';
+    if (m % 60 === 0) return '提前 ' + (m / 60) + ' 小时';
+    return '提前 ' + m + ' 分钟';
+  }
+
+  // 校验「指定时间点提醒」remindAt（可选，绝对时间戳）
+  function validateRemindAt(input, errors) {
+    if (input.remindAt != null) {
+      var ra = Number(input.remindAt);
+      if (!isFinite(ra) || ra <= 0) errors.push('提醒时间无效');
+    }
+  }
+
+  // 取有效提醒提前量列表（分钟）：优先 reminds 数组，回退单值 remindBefore（旧数据兼容）。
+  // 过滤非法值（<=0 或非数字），去重；空数组表示不提醒。
+  function effectiveReminds(item) {
+    if (!item) return [];
+    if (item.reminds && Array.isArray(item.reminds) && item.reminds.length) {
+      const out = [];
+      const seen = {};
+      item.reminds.forEach(function (m) {
+        const v = Number(m);
+        if (isFinite(v) && v > 0 && !seen[v]) { seen[v] = true; out.push(v); }
+      });
+      return out;
+    }
+    const rb = Number(item.remindBefore);
+    return (isFinite(rb) && rb > 0) ? [rb] : [];
+  }
+
   // ---- 校验 ----
   function validateEvent(input) {
     var errors = [];
@@ -89,6 +124,7 @@
       }
       if (input.repeat.endDate && input.repeat.endDate < input.startTime) errors.push('重复结束时间需晚于开始时间');
     }
+    validateRemindAt(input, errors);
     return { ok: errors.length === 0, errors: errors };
   }
 
@@ -104,6 +140,7 @@
         errors.push('预估耗时需为 1~1440 的整数分钟');
       }
     }
+    validateRemindAt(input, errors);
     return { ok: errors.length === 0, errors: errors };
   }
 
@@ -491,6 +528,8 @@
     displayStatus: displayStatus,
     validateEvent: validateEvent,
     validateTodo: validateTodo,
+    formatRemind: formatRemind,
+    effectiveReminds: effectiveReminds,
     expandOccurrences: expandOccurrences,
     calcStats: calcStats,
     calcQuadrant: calcQuadrant,

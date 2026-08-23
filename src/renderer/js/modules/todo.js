@@ -295,14 +295,31 @@ window.Modules.todo = (function () {
     repeatSelect.dataset.field = 'repeatType';
     repeatRow.appendChild(repeatSelect);
     rr.appendChild(repeatRow);
+    body.appendChild(rr);
 
     const remindRow = el('div', 'form-row');
-    remindRow.appendChild(el('label', null, '提醒'));
-    const remindSelect = H.select(C.REMIND_OPTIONS, function (m) { return m === 0 ? '不提醒' : '提前 ' + m + ' 分钟'; }, t ? (t.remindBefore || 0) : Store.get().settings.defaultRemindBefore);
-    remindSelect.dataset.field = 'remindBefore';
-    remindRow.appendChild(remindSelect);
-    rr.appendChild(remindRow);
-    body.appendChild(rr);
+    remindRow.appendChild(el('label', null, '提醒（可多选）'));
+    const defaultReminds = t
+      ? window.Utils.effectiveReminds(t)
+      : (Store.get().settings.defaultRemindBefore > 0 ? [Store.get().settings.defaultRemindBefore] : []);
+    remindRow.appendChild(H.remindGroup(defaultReminds));
+    body.appendChild(remindRow);
+
+    const remindAtRow = el('div', 'form-row');
+    remindAtRow.appendChild(el('label', null, '指定时间提醒（可选）'));
+    const remindAtGrid = el('div', 'form-grid');
+    const remindAtDate = el('input');
+    remindAtDate.type = 'date'; remindAtDate.dataset.field = 'remindAtDate';
+    const remindAtTime = el('input');
+    remindAtTime.type = 'time'; remindAtTime.dataset.field = 'remindAtTime';
+    if (t && t.remindAt) {
+      remindAtDate.value = window.Utils.toDateStr(t.remindAt);
+      remindAtTime.value = window.Utils.toTimeStr(t.remindAt);
+    }
+    remindAtGrid.appendChild(remindAtDate);
+    remindAtGrid.appendChild(remindAtTime);
+    remindAtRow.appendChild(remindAtGrid);
+    body.appendChild(remindAtRow);
 
     const intervalRow = el('div', 'form-row');
     intervalRow.appendChild(el('label', null, '自定义周期（天）'));
@@ -336,6 +353,7 @@ window.Modules.todo = (function () {
       okText: '保存',
       onOk: function () {
         const d = window.Dom.readForm(body);
+        const reminds = H.remindValues(body);
         const input = {
           title: d.title.trim(),
           description: d.description.trim(),
@@ -344,7 +362,9 @@ window.Modules.todo = (function () {
           categoryId: d.categoryId,
           importance: d.importance || 'important',
           repeat: H.buildRepeat(d),
-          remindBefore: Number(d.remindBefore),
+          reminds: reminds,
+          remindBefore: reminds.length ? Math.min.apply(null, reminds) : 0,
+          remindAt: d.remindAtDate ? window.Utils.parseDateTime(d.remindAtDate, d.remindAtTime || '09:00') : null,
           estimatedMinutes: d.estimatedMinutes ? Number(d.estimatedMinutes) : null,
         };
         const v = window.Utils.validateTodo(input);
@@ -408,7 +428,7 @@ window.Modules.todo = (function () {
           title: t.title, description: t.description || '', allDay: false,
           startTime: start, endTime: end, priority: t.priority || 'medium',
           categoryId: t.categoryId, categoryName: cat.name, categoryColor: cat.color,
-          repeat: { type: 'none', interval: 1, endDate: null }, remindBefore: 0,
+          repeat: { type: 'none', interval: 1, endDate: null }, remindBefore: 0, reminds: [],
         };
         Store.addEvent(ev);
         Store.updateTodo(t.id, { scheduledEventId: ev.id });

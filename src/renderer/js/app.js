@@ -10,6 +10,8 @@ window.App = (function () {
     plan: window.Modules.plan,
     inbox: window.Modules.inbox,
     review: window.Modules.review,
+    memorials: window.Modules.memorials,
+    bookkeeping: window.Modules.bookkeeping,
     search: window.Modules.search,
     stats: window.Modules.stats,
     settings: window.Modules.settings,
@@ -36,6 +38,11 @@ window.App = (function () {
     API.onReminder(function () {
       Toast.info('有日程/任务到提醒时间');
       renderCurrent();
+    });
+
+    // 点击通知 -> 定位到条目并弹出操作条（完成 / 稍后）
+    API.onReminderAction(function (payload) {
+      showReminderAction(payload || {});
     });
 
     // 全局快捷键快速捕捉 -> 打开收件箱快速捕捉弹窗
@@ -99,6 +106,63 @@ window.App = (function () {
       s.classList.toggle('active', s.id === 'view-' + view);
     });
     renderCurrent();
+  }
+
+  // 点击通知：定位到对应视图并弹出「操作条」（完成 / 稍后 10 分钟 / 稍后 1 小时）
+  function showReminderAction(payload) {
+    const id = payload.id;
+    if (!id) return;
+    const entityType = payload.entityType === 'todo' ? 'todo' : 'event';
+    const record = (entityType === 'todo'
+      ? Store.get().todos.find(function (t) { return t.id === id; })
+      : Store.get().events.find(function (e) { return e.id === id; }));
+    if (!record) {
+      Toast.info('提醒条目已不存在');
+      return;
+    }
+    switchView(entityType === 'todo' ? 'todo' : 'schedule');
+
+    const body = document.createElement('div');
+    const title = document.createElement('div');
+    title.textContent = record.title || '';
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '4px';
+    body.appendChild(title);
+    const hint = document.createElement('div');
+    hint.className = 'item-meta';
+    hint.textContent = entityType === 'todo' ? '待办提醒' : '日程提醒';
+    body.appendChild(hint);
+
+    const btns = document.createElement('div');
+    btns.style.marginTop = '16px';
+
+    function btn(label, cls, onClick) {
+      const b = document.createElement('button');
+      b.className = 'btn ' + cls;
+      b.textContent = label;
+      b.style.marginRight = '8px';
+      b.addEventListener('click', onClick);
+      return b;
+    }
+
+    btns.appendChild(btn('完成', 'btn-primary', function () {
+      if (entityType === 'todo') Store.updateTodo(id, { status: 'done', completedAt: Date.now() });
+      else Store.updateEvent(id, { status: 'done' });
+      window.Modal.close();
+      Toast.success('已完成');
+    }));
+    btns.appendChild(btn('稍后 10 分钟', '', function () { snooze(10); }));
+    btns.appendChild(btn('稍后 1 小时', '', function () { snooze(60); }));
+    body.appendChild(btns);
+
+    function snooze(minutes) {
+      API.snoozeReminder({ id: id, minutes: minutes }).then(function () {
+        window.Modal.close();
+        Toast.success('已稍后 ' + minutes + ' 分钟');
+      });
+    }
+
+    window.Modal.open({ title: '提醒操作', content: body, okText: false });
   }
 
   document.addEventListener('DOMContentLoaded', init);

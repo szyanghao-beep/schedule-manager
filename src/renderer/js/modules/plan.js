@@ -11,6 +11,7 @@ window.Modules.plan = (function () {
   const clear = window.Dom.clear;
   const H = window.Helpers;
   const Utils = window.Utils;
+  const LunarUtil = window.LunarUtil || null;
 
   function render() {
     const root = document.getElementById('view-plan');
@@ -20,6 +21,11 @@ window.Modules.plan = (function () {
     const now = Date.now();
     const dayStart = Utils.startOfDay(now);
     const dayEnd = Utils.addDays(dayStart, 1);
+
+    // 休息日影响规划（A6）：周末/法定假日暂停自动排程，避免把任务塞进休息日
+    const cal = state.settings && state.settings.calendar;
+    const holidayData = state.settings && state.settings.holidayData;
+    const restMode = !!(LunarUtil && cal && cal.restDayAffectsPlanning !== false && LunarUtil.isRestDay(now, holidayData));
 
     // 已存在的日程 id（用于判断 scheduledEventId 是否仍有效）
     const liveEventIds = {};
@@ -49,12 +55,14 @@ window.Modules.plan = (function () {
       });
     });
 
-    const result = Utils.autoSchedule(candidates, state.events, {
-      now, dayStart,
-      workStartHour: C.WORK_HOURS.start, workEndHour: C.WORK_HOURS.end,
-      slotMinutes: C.SCHEDULE_SLOT_MINUTES, bufferMinutes: C.SCHEDULE_BUFFER_MINUTES,
-      urgentThresholdMs: H.urgentThresholdMs(),
-    });
+    const result = restMode
+      ? { blocks: [], unscheduled: [] }
+      : Utils.autoSchedule(candidates, state.events, {
+          now, dayStart,
+          workStartHour: C.WORK_HOURS.start, workEndHour: C.WORK_HOURS.end,
+          slotMinutes: C.SCHEDULE_SLOT_MINUTES, bufferMinutes: C.SCHEDULE_BUFFER_MINUTES,
+          urgentThresholdMs: H.urgentThresholdMs(),
+        });
     const candById = {};
     candidates.forEach(function (t) { candById[t.id] = t; });
 
@@ -64,12 +72,19 @@ window.Modules.plan = (function () {
     const btnWrap = el('div', 'cal-nav');
     const applyBtn = el('button', 'btn btn-primary', '应用排程到日程');
     applyBtn.addEventListener('click', function () { applyBlocks(result.blocks, candById); });
+    if (restMode) applyBtn.disabled = true;
     const redoBtn = el('button', 'btn', '重新排程');
     redoBtn.addEventListener('click', render);
     btnWrap.appendChild(applyBtn);
     btnWrap.appendChild(redoBtn);
     header.appendChild(btnWrap);
     root.appendChild(header);
+
+    // 休息日提示（A6）
+    if (restMode) {
+      const hint = el('div', 'plan-rest-hint', '今天是休息日（周末或法定假日），已暂停自动排程。可在「设置 → 日历显示」中关闭「休息日影响规划」。');
+      root.appendChild(hint);
+    }
 
     // 汇总
     const summary = el('div', 'plan-summary');

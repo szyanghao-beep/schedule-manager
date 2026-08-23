@@ -15,6 +15,11 @@ window.Store = (function () {
     events: [],
     todos: [],
     settings: { defaultRemindBefore: 15, urgentThresholdHours: 24, theme: 'system' },
+    accounts: [],
+    transactions: [],
+    bookkeepingCategories: [],
+    budgets: [],
+    memorials: [],
   };
 
   const listeners = [];
@@ -31,6 +36,11 @@ window.Store = (function () {
       events: alive(state.events),
       todos: alive(state.todos),
       settings: state.settings,
+      accounts: alive(state.accounts),
+      transactions: alive(state.transactions),
+      bookkeepingCategories: alive(state.bookkeepingCategories),
+      budgets: alive(state.budgets),
+      memorials: alive(state.memorials),
     };
   }
 
@@ -59,6 +69,11 @@ window.Store = (function () {
         events: state.events,
         todos: state.todos,
         settings: state.settings,
+        accounts: state.accounts,
+        transactions: state.transactions,
+        bookkeepingCategories: state.bookkeepingCategories,
+        budgets: state.budgets,
+        memorials: state.memorials,
       });
     }, 500);
   }
@@ -153,6 +168,64 @@ window.Store = (function () {
     commit();
   }
 
+  // ---- 记账账户 ----
+  function addAccount(a) { touch(a); state.accounts.push(a); commit(); }
+  function updateAccount(id, patch) {
+    const a = state.accounts.find(function (x) { return x.id === id && !x.deleted; });
+    if (a) { Object.assign(a, patch); touch(a); commit(); }
+  }
+  function deleteAccount(id) {
+    const a = state.accounts.find(function (x) { return x.id === id && !x.deleted; });
+    if (a) { a.deleted = true; touch(a); commit(); }
+  }
+
+  // ---- 记账分类 ----
+  function addBookkeepingCategory(c) { touch(c); state.bookkeepingCategories.push(c); commit(); }
+  function updateBookkeepingCategory(id, patch) {
+    const c = state.bookkeepingCategories.find(function (x) { return x.id === id && !x.deleted; });
+    if (c) { Object.assign(c, patch); touch(c); commit(); }
+  }
+  function deleteBookkeepingCategory(id) {
+    const c = state.bookkeepingCategories.find(function (x) { return x.id === id && !x.deleted; });
+    if (c) { c.deleted = true; touch(c); }
+    // 关联流水归为未分类
+    state.transactions.forEach(function (t) { if (t.categoryId === id && !t.deleted) { t.categoryId = null; touch(t); } });
+    commit();
+  }
+
+  // ---- 流水 ----
+  function addTransaction(t) { touch(t); state.transactions.push(t); commit(); }
+  function updateTransaction(id, patch) {
+    const t = state.transactions.find(function (x) { return x.id === id && !x.deleted; });
+    if (t) { Object.assign(t, patch); touch(t); commit(); }
+  }
+  function deleteTransaction(id) {
+    const t = state.transactions.find(function (x) { return x.id === id && !x.deleted; });
+    if (t) { t.deleted = true; touch(t); commit(); }
+  }
+
+  // ---- 预算 ----
+  function addBudget(b) { touch(b); state.budgets.push(b); commit(); }
+  function updateBudget(id, patch) {
+    const b = state.budgets.find(function (x) { return x.id === id && !x.deleted; });
+    if (b) { Object.assign(b, patch); touch(b); commit(); }
+  }
+  function deleteBudget(id) {
+    const b = state.budgets.find(function (x) { return x.id === id && !x.deleted; });
+    if (b) { b.deleted = true; touch(b); commit(); }
+  }
+
+  // ---- 纪念日 ----
+  function addMemorial(m) { touch(m); state.memorials.push(m); commit(); }
+  function updateMemorial(id, patch) {
+    const m = state.memorials.find(function (x) { return x.id === id && !x.deleted; });
+    if (m) { Object.assign(m, patch); touch(m); commit(); }
+  }
+  function deleteMemorial(id) {
+    const m = state.memorials.find(function (x) { return x.id === id && !x.deleted; });
+    if (m) { m.deleted = true; touch(m); commit(); }
+  }
+
   return {
     get: get,
     getRaw: getRaw,
@@ -169,5 +242,20 @@ window.Store = (function () {
     deleteTodo: deleteTodo,
     deleteTodos: deleteTodos,
     updateTodos: updateTodos,
+    addAccount: addAccount,
+    updateAccount: updateAccount,
+    deleteAccount: deleteAccount,
+    addBookkeepingCategory: addBookkeepingCategory,
+    updateBookkeepingCategory: updateBookkeepingCategory,
+    deleteBookkeepingCategory: deleteBookkeepingCategory,
+    addTransaction: addTransaction,
+    updateTransaction: updateTransaction,
+    deleteTransaction: deleteTransaction,
+    addBudget: addBudget,
+    updateBudget: updateBudget,
+    deleteBudget: deleteBudget,
+    addMemorial: addMemorial,
+    updateMemorial: updateMemorial,
+    deleteMemorial: deleteMemorial,
   };
 })();
