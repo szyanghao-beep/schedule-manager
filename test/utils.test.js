@@ -40,6 +40,17 @@ test('validateEvent 自定义周期需为正整数', function () {
   assert.strictEqual(Utils.validateEvent(bad).ok, false);
 });
 
+test('validateEvent 合法重复类型不应被误判（回归：in 检查 key 的 bug）', function () {
+  // repeat.type 是小写「值」（daily/weekly/monthly/custom），不能用 `in` 判断 key
+  ['daily', 'weekly', 'monthly', 'custom'].forEach(function (t) {
+    const r = Utils.validateEvent({ title: 'x', allDay: true, repeat: { type: t, interval: 1 } });
+    assert.strictEqual(r.ok, true, t + ' 应为合法重复类型');
+  });
+  // 非法类型仍应报错
+  const bad = Utils.validateEvent({ title: 'x', allDay: true, repeat: { type: 'yearly', interval: 1 } });
+  assert.strictEqual(bad.ok, false);
+});
+
 test('expandOccurrences 不重复只生成一条', function () {
   const start = new Date('2026-08-01T09:00:00').getTime();
   const occ = Utils.expandOccurrences({ id: 'a', startTime: start, endTime: start + 3600000, repeat: { type: 'none' } });

@@ -375,18 +375,26 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   border-bottom: 1px solid var(--border);
   background: #fafbfc;
 }
-.cal-weekday { padding: 8px; text-align: center; font-size: 12px; color: var(--muted); }
+.cal-weekday {
+  padding: 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  border-right: 1px solid var(--border); /* 与 .cal-cell 的边框结构一致，保证表头与日期列对齐 */
+}
+.cal-weekday:last-child { border-right: none; }
 .cal-cells {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
 }
 .cal-cell {
-  min-height: 90px;
+  min-height: 76px;
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 4px;
   cursor: pointer;
   position: relative;
+  overflow: hidden; /* 内容过多时不撑破格子，配合「+N 更多」保持月视图紧凑、整月可见 */
 }
 .cal-cell:nth-child(7n) { border-right: none; }
 .cal-cell:hover { background: #fafbfc; }

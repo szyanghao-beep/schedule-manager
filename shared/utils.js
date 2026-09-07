@@ -118,7 +118,10 @@
       else if (input.endTime <= input.startTime) errors.push('结束时间必须晚于开始时间');
     }
     if (input.repeat && input.repeat.type && input.repeat.type !== REPEAT_TYPE.NONE) {
-      if (!(input.repeat.type in REPEAT_TYPE)) errors.push('重复规则无效');
+      // 检查 type 是否为合法「值」（REPEAT_TYPE 的 value 是小写，key 是大写，
+      // 不能用 `in` 判断 key，否则 weekly/daily 等会被误判为「重复规则无效」）
+      const validTypes = Object.keys(REPEAT_TYPE).map(function (k) { return REPEAT_TYPE[k]; });
+      if (validTypes.indexOf(input.repeat.type) === -1) errors.push('重复规则无效');
       if (input.repeat.type === REPEAT_TYPE.CUSTOM && (!input.repeat.interval || input.repeat.interval < 1)) {
         errors.push('自定义周期需为正整数');
       }
