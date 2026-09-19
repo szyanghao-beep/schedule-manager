@@ -30,4 +30,8 @@ window.API = {
   syncLogout: function () { return window.api.syncLogout(); },
   onSyncDataUpdated: function (cb) { window.api.onSyncDataUpdated(cb); },
   onSyncConflict: function (cb) { window.api.onSyncConflict(cb); },
+  // 内嵌同步服务器（本机作为同步中心）
+  syncServerStatus: function () { return window.api.syncServerStatus(); },
+  syncServerStart: function () { return window.api.syncServerStart(); },
+  syncServerStop: function () { return window.api.syncServerStop(); },
 };

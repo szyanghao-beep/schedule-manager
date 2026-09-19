@@ -11,11 +11,32 @@
 | 结构 | 主进程 `main.js` + `preload.js`（项目根目录）；渲染层 `src/renderer/` |
 | 数据持久化 | `userData/data.json`，防抖保存 500ms，自动备份（最多 10 份） |
 | 仓库 | https://github.com/szyanghao-beep/schedule-manager.git（分支 `main`） |
-| 当前版本 | **v2.3.2** |
+| 当前版本 | **v2.3.3** |
 
 ---
 
 ## 版本历史
+
+### v2.3.3（2026-09-19）— 修复「安装后设置页缺少本机同步服务」
+
+**问题**：安装 v2.3.2 后，设置页看不到「本机同步服务」卡片（其后的「多端同步」卡片也一并消失）。
+
+**根因**：`preload.js` 暴露了 `syncServerStatus` / `syncServerStart` / `syncServerStop`，
+但 `src/renderer/js/api.js` **漏了这三个方法的透传**。设置页调用 `window.API.syncServerStatus()` 时
+该值为 `undefined`，会**同步抛出 TypeError**（`.catch` 捕获不到 Promise 之外的异常），
+导致设置页渲染在「本机同步服务」处中断，后面所有卡片都不显示。
+
+**修复**：`api.js` 补齐三个方法的透传。
+
+**防回归（新增两类契约测试 + 真实冒烟）**——此前单测只覆盖纯函数，抓不到这类跨文件不一致：
+- `test/api.contract.test.js`（4 例）：preload 暴露 ↔ api.js 透传 ↔ 渲染层调用 ↔ 主进程 IPC 通道，四方一致性校验
+- `test/system.contract.test.js`（8 例）：数据集合一致性（defaultData↔store）、同步白名单接线不漏、
+  index.html 脚本与导航完整性、打包 files 覆盖必需文件、生产依赖齐全、内嵌服务器模块可 require
+- `scripts/electron-smoke.js`（17 项）：**用真实 Electron 运行整套应用**，验证设置页/客户页真实渲染、
+  内嵌同步服务 IPC 正常返回（含局域网 IP 与配对码）、全部 10 个视图无异常、无渲染层错误
+  （运行：`npx electron scripts/electron-smoke.js`）
+
+**测试**：全量 248 用例通过 + 真实 Electron 冒烟 17/17 通过。
 
 ### v2.3.2（2026-09-07）— 客户商机跟进 + 手机端收集直传
 
