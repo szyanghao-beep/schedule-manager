@@ -3,8 +3,9 @@
  *
  * 职责：
  *   - 启动时从 AsyncStorage 恢复本地数据（store.load），加载期间显示 Splash；
- *   - 登录态分流：未登录 -> Login 页；已登录 -> 主界面（底部 Tab：日程/待办/我的）
- *     以及以 modal 形式压栈的表单页（EventForm / TodoForm）；
+ *   - 主界面底部 Tab：收集 / 日程 / 待办 / 我的；
+ *     ★「收集」页免登录可用（离线随手记 → 手动直传电脑收件箱），
+ *       日程/待办/我的需要登录同步账号（未登录时在「我的」页登录）；
  *   - 启动后：注册自动推送（startAutoPush），已有 token 时立即同步一次。
  */
 import React, { useEffect } from 'react';
@@ -19,6 +20,7 @@ import store from './src/store';
 import syncClient from './src/syncClient';
 import notifications from './src/notifications';
 import LoginScreen from './src/screens/LoginScreen';
+import CollectScreen from './src/screens/CollectScreen';
 import EventsScreen from './src/screens/EventsScreen';
 import TodosScreen from './src/screens/TodosScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
@@ -41,6 +43,11 @@ function MainTabs() {
         tabBarActiveTintColor: '#4f8ef7',
       }}
     >
+      <Tab.Screen
+        name="Collect"
+        component={CollectScreen}
+        options={{ title: '收集', headerShown: false, tabBarIcon: makeTabIcon('📥') }}
+      />
       <Tab.Screen
         name="Events"
         component={EventsScreen}
@@ -70,30 +77,28 @@ function Splash() {
 }
 
 function Root() {
-  // 订阅 store：token 变化时自动在 Login 与主界面之间切换
   useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const token = store.getToken();
   if (!store.isLoaded()) return <Splash />;
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerTitleAlign: 'center', headerBackTitle: '返回' }}>
-        {token ? (
-          <>
-            <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
-            <Stack.Screen
-              name="EventForm"
-              component={EventForm}
-              options={{ presentation: 'modal', title: '日程' }}
-            />
-            <Stack.Screen
-              name="TodoForm"
-              component={TodoForm}
-              options={{ presentation: 'modal', title: '待办' }}
-            />
-          </>
-        ) : (
-          <Stack.Screen name="Login" component={LoginScreen} options={{ headerShown: false }} />
-        )}
+        {/* 主界面始终可用：「收集」免登录；登录作为模态页，从「我的」进入 */}
+        <Stack.Screen name="Main" component={MainTabs} options={{ headerShown: false }} />
+        <Stack.Screen
+          name="Login"
+          component={LoginScreen}
+          options={{ presentation: 'modal', title: '登录同步账号' }}
+        />
+        <Stack.Screen
+          name="EventForm"
+          component={EventForm}
+          options={{ presentation: 'modal', title: '日程' }}
+        />
+        <Stack.Screen
+          name="TodoForm"
+          component={TodoForm}
+          options={{ presentation: 'modal', title: '待办' }}
+        />
       </Stack.Navigator>
     </NavigationContainer>
   );

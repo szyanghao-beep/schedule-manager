@@ -10,4 +10,5 @@ module.exports = {
   migrate: require('./migrate.js'),
   sync: require('./sync.js'),
   model: require('./model.js'),
+  inbox: require('./inbox.js'),
 };

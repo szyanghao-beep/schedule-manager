@@ -6,14 +6,17 @@
 const { app, BrowserWindow, ipcMain, Notification, dialog, Tray, Menu, nativeImage, safeStorage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const Utils = require('./shared/utils.js');
 const constants = require('./shared/constants.js');
 const { DATA_VERSION, migrateData } = require('./shared/migrate.js');
 const sync = require('./shared/sync.js');
+const inboxUtil = require('./shared/inbox.js');
 const nodemailer = require('nodemailer');
 const { buildDailyDigest, shouldSendDailyEmail } = require('./shared/digest.js');
 const LunarUtil = require('./shared/lunar.js');
 const aiIndex = require('./ai/index.js');
+const { derivePairingCode } = require('./server/src/inboxDrop.js');
 
 // 测试/冒烟隔离：设置 SCHEDULE_USER_DATA_DIR 可覆盖用户数据目录，避免污染真实数据。
 // 生产运行不设此变量，行为不变。必须在首次 app.getPath('userData') 前设置。
@@ -774,12 +777,48 @@ function resolveSyncServerSecret() {
   return generated;
 }
 
+// 本机局域网 IPv4 列表（供手机端填写服务器地址，省去用户自己查 IP）
+function localNetworkIps() {
+  const out = [];
+  try {
+    const ifaces = os.networkInterfaces();
+    Object.keys(ifaces).forEach(function (name) {
+      (ifaces[name] || []).forEach(function (info) {
+        if (info && info.family === 'IPv4' && !info.internal) out.push(info.address);
+      });
+    });
+  } catch (e) { /* 忽略 */ }
+  return out;
+}
+
+// 接收手机端「局域网收集直传」的条目：按 id 去重后并入待办。
+// 关键：deadline = null 且未完成 —— 正好是电脑端「收件箱（未整理）」的定义，
+// 因此条目会立刻出现在收件箱等待整理，无需额外状态字段。
+function handleInboxDrop(items) {
+  const res = inboxUtil.mergeInboxItems(data.todos, items, Date.now());
+  data.todos = res.todos;
+  if (res.accepted > 0) {
+    persistData();
+    notifyRendererRefresh();
+  }
+  return {
+    accepted: res.accepted,
+    duplicated: res.duplicated,
+    invalid: res.invalid,
+    total: data.todos.length,
+  };
+}
+
 function syncServerStatusPayload() {
+  let pairingCode = '';
+  try { pairingCode = derivePairingCode(resolveSyncServerSecret()); } catch (e) { /* 忽略 */ }
   return {
     enabled: syncServerState.enabled,
     running: syncServerState.running,
     port: syncServerState.port,
     url: syncServerState.running ? ('http://127.0.0.1:' + syncServerState.port) : '',
+    ips: localNetworkIps(),   // 局域网 IP列表，供手机端填服务器地址
+    pairingCode: pairingCode, // 手机端「收集直传」需要的配对码
     error: syncServerState.error || '',
   };
 }
@@ -790,7 +829,10 @@ function startSyncServer() {
     const { createApp } = require('./server/src/app.js');
     const { createDb } = require('./server/src/db.js');
     syncServerDb = createDb(syncServerDbPath());
-    const serverApp = createApp(syncServerDb, resolveSyncServerSecret());
+    const serverApp = createApp(syncServerDb, resolveSyncServerSecret(), {
+      pairingCode: derivePairingCode(resolveSyncServerSecret()),
+      onInboxDrop: handleInboxDrop, // 手机端局域网收集直传 → 直接并入本机收件箱
+    });
     syncServer = serverApp.listen(syncServerState.port, '0.0.0.0', function () {
       syncServerState.running = true;
       syncServerState.error = '';

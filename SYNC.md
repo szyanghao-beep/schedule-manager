@@ -11,11 +11,12 @@
 │   ├── constants.js   # 状态/优先级/重复/分类/四象限常量
 │   ├── migrate.js     # 数据 schema 版本迁移
 │   ├── sync.js        # 同步纯函数：LWW 合并、软删除墓碑、增量提取、extractLocalChanges
+│   ├── inbox.js       # 收集条目规范化与合并（手机收集 → 电脑收件箱）
 │   ├── model.js       # 数据模型契约 + change 校验
 │   └── index.js       # 统一导出
-├── server/      # Node 后端（Express + node:sqlite + JWT），认证 + 增量同步 + 服务端仲裁
-├── mobile/      # React Native 安卓端（复用 shared，登录 + 同步 + 日程/待办 MVP）
-├── main.js      # 桌面端主进程（含同步 IPC 与拉推合并逻辑）
+├── server/      # Node 后端（Express + node:sqlite + JWT）：认证 + 增量同步 + 收集直传端点
+├── mobile/      # React Native 安卓端（收集 / 日程 / 待办 / 我的）
+├── main.js      # 桌面端主进程（内嵌同步服务器 + 同步 IPC + 收集接收）
 ├── preload.js   # 桌面端安全桥（含同步 API）
 └── src/         # 桌面端渲染层（store 已改造为软删除 + 记录级 updatedAt）
 ```
@@ -60,11 +61,38 @@ npm run android
 5. **增量游标**：拉取 `since=lastPulledAt`（服务端时间轴），推送 `since=lastPushedAt`（客户端时间轴），两者独立。
 6. **桌面端自动同步**：本地变更防抖 2s 自动推送，启动时自动拉取；同步状态（含加密 token）持久化到 `sync-state.json`，重启不丢配置。
 
+## 局域网收集直传（免登录，手机 → 电脑收件箱）
+
+与上面的「账号双向同步」并列的另一条轻量通道，专为「手机随手记 → 回家手动送进电脑收件箱」设计：
+
+**手机端**：底部「收集」Tab（免登录可用）
+- 极简输入框，记完一条自动清空，可连续录入多个想法
+- 纯离线：只写本地（AsyncStorage），**不自动联网**
+- 顶部显示「待同步 N 条」；底部「同步到电脑」按钮，首次填电脑地址 + 收集口令即可（之后记住）
+
+**电脑端**：设置 →「本机同步服务」启用后自动支持
+- 页面直接显示**局域网地址**（免去自己查 IP）与**收集口令**（6 位，由同步密钥 HMAC 派生、稳定不变）
+- 接收端点 `POST /api/inbox-drop`：校验 `X-Pairing-Code` 头 → 按条目 id 去重（幂等）→ 并入收件箱
+
+**为什么能直接进收件箱**：电脑端「收件箱」的定义是「未完成 + 无截止时间的待办」，而手机收集的条目正好规范化为 `deadline: null, status: 'pending'`（见 `shared/inbox.js`），语义天然吻合，无需额外状态字段。
+
+**安全**：免登录但需配对码（防止同网陌生设备写入）；单次最多 500 条；非法条目忽略。
+
+**数据流**：
+
+```
+手机收集（离线）→ 点「同步到电脑」→ POST /api/inbox-drop（带配对码）
+   → 电脑端 mergeInboxItems 去重合并进 todos → 立刻出现在「收件箱」等待整理
+```
+
 ## 测试
 
 ```bash
-npm test            # 桌面端 + shared 全量（含 sync.test.js 12 个同步用例）
-cd server && npm install && node verify-server.js   # 后端 17 项集成测试
+npm test            # 桌面端 + shared 全量（含 sync / inbox 等用例）
+cd server && npm install
+node verify-server.js       # 后端集成测试（认证 + 增量同步）
+node verify-e2e.js          # 真实文件 DB + 重启持久化
+node verify-inbox-drop.js   # 收集直传端点（配对码 / 幂等 / 收件箱语义）
 ```
 
 ## 已知限制

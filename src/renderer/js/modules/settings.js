@@ -288,7 +288,7 @@ window.Modules.settings = (function () {
     const card = el('div', 'card');
     card.style.marginTop = '16px';
     card.appendChild(el('div', 'panel-title', '本机同步服务（同步中心）'));
-    const hint = el('div', 'item-meta', '启用后本机即作为同步服务器运行在 8787 端口，且下次开机自动启动；安卓手机连本机局域网 IP 即可互通，无需单独安装 Node。');
+    const hint = el('div', 'item-meta', '启用后本机即作为同步服务器运行在 8787 端口，且下次开机自动启动；安卓手机连本机局域网 IP 即可互通，无需单独安装 Node。同时支持手机端「收集」直传（免登录，凭配对码）。');
     hint.style.margin = '8px 0';
     card.appendChild(hint);
 
@@ -303,7 +303,34 @@ window.Modules.settings = (function () {
       cb.checked = !!(st && st.running);
       window.Dom.clear(statusBox);
       if (st && st.running) {
-        statusBox.appendChild(el('div', 'item-meta', '运行中：' + st.url + '　手机端地址 http://<本机局域网IP>:' + st.port));
+        statusBox.appendChild(el('div', 'item-meta', '运行中：' + st.url));
+
+        // 局域网 IP —— 手机端要填的服务器地址（免去用户自己查 IP）
+        const ips = (st.ips && st.ips.length) ? st.ips : [];
+        if (ips.length) {
+          const ipLine = el('div', 'item-meta');
+          ipLine.style.marginTop = '6px';
+          ipLine.textContent = '手机端填这个地址：' + ips.map(function (ip) { return 'http://' + ip + ':' + st.port; }).join('　或　');
+          statusBox.appendChild(ipLine);
+        } else {
+          statusBox.appendChild(el('div', 'item-meta', '未检测到局域网 IP（请确认电脑已连 WiFi 或网线）'));
+        }
+
+        // 配对码 —— 手机端「收集 → 同步到电脑」时填写
+        if (st.pairingCode) {
+          const codeRow = el('div', 'item-meta');
+          codeRow.style.marginTop = '6px';
+          codeRow.appendChild(document.createTextNode('收集口令：'));
+          const code = el('span', null, st.pairingCode);
+          code.style.cssText = 'font-family:monospace;font-size:16px;font-weight:700;letter-spacing:2px;color:var(--primary);margin-left:4px;';
+          codeRow.appendChild(code);
+          statusBox.appendChild(codeRow);
+        }
+
+        const usage = el('div', 'item-meta');
+        usage.style.marginTop = '6px';
+        usage.textContent = '手机用法：在「收集」页随手记待办/想法（离线可记）→ 连上同一 WiFi → 点「同步到电脑」并填上面的地址与口令 → 条目会出现在本机「收件箱」等待整理。';
+        statusBox.appendChild(usage);
       } else if (st && st.error) {
         statusBox.appendChild(el('div', 'item-meta', '启动失败：' + st.error));
       } else {

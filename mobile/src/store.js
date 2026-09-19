@@ -32,6 +32,9 @@ const state = {
   loaded: false,
   listeners: new Set(),
   persistTimer: null,
+  // 手机端「收集」箱：离线随手记的待办/想法，攒着，回到电脑旁手动直传到电脑收件箱
+  localInbox: [], // [{ id, title, createdAt, synced }]
+  inboxServer: { url: '', code: '' }, // 收集直传配置（免登录，仅需地址 + 配对码）
 };
 
 // ---------------- 订阅 ----------------
@@ -67,6 +70,8 @@ async function persistNow() {
       lastSyncAt: state.lastSyncAt,
       journal: state.journal,
       records: Array.from(state.map.values()),
+      localInbox: state.localInbox,
+      inboxServer: state.inboxServer,
     };
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
   } catch (e) {
@@ -84,6 +89,11 @@ async function load() {
       state.user = s.user || null;
       state.lastSyncAt = s.lastSyncAt || 0;
       state.journal = Array.isArray(s.journal) ? s.journal : [];
+      state.localInbox = Array.isArray(s.localInbox) ? s.localInbox : [];
+      state.inboxServer = {
+        url: (s.inboxServer && s.inboxServer.url) || '',
+        code: (s.inboxServer && s.inboxServer.code) || '',
+      };
       state.map = new Map();
       (Array.isArray(s.records) ? s.records : []).forEach((r) => {
         if (r && r.entityType && r.id != null) state.map.set(r.entityType + ':' + r.id, r);
@@ -277,6 +287,79 @@ function pruneJournalAfterPush(serverTime) {
   if (removed.length) notify();
 }
 
+// ---------------- 收集箱（手机端离线收集 → 手动直传电脑收件箱） ----------------
+// 设计：收集时只写本地（离线可用、纯手动不联网）；回到电脑旁点「同步到电脑」，
+// 把未同步（synced=false）的条目 POST 给电脑，成功后标记已同步（幂等，重复点不会重复导入）。
+function getLocalInbox() {
+  return state.localInbox.slice();
+}
+
+function getPendingInbox() {
+  return state.localInbox.filter((it) => !it.synced);
+}
+
+function getPendingInboxCount() {
+  return state.localInbox.filter((it) => !it.synced).length;
+}
+
+function addInboxItem(title) {
+  const t = String(title == null ? '' : title).trim();
+  if (!t) return null;
+  const item = {
+    id: utils.genId(),
+    title: t.slice(0, 500),
+    createdAt: Date.now(),
+    synced: false,
+  };
+  state.localInbox.unshift(item); // 最新的在最上面
+  notify();
+  return item;
+}
+
+function updateInboxItem(id, title) {
+  const it = state.localInbox.find((x) => x.id === id);
+  if (!it) return;
+  it.title = String(title).slice(0, 500);
+  it.synced = false; // 改过就要重新传一次
+  notify();
+}
+
+function removeInboxItem(id) {
+  const before = state.localInbox.length;
+  state.localInbox = state.localInbox.filter((it) => it.id !== id);
+  if (state.localInbox.length !== before) notify();
+}
+
+function markInboxSynced(ids) {
+  const set = new Set(ids || []);
+  let changed = false;
+  state.localInbox.forEach((it) => {
+    if (set.has(it.id) && !it.synced) {
+      it.synced = true;
+      changed = true;
+    }
+  });
+  if (changed) notify();
+}
+
+function clearSyncedInbox() {
+  const before = state.localInbox.length;
+  state.localInbox = state.localInbox.filter((it) => !it.synced);
+  if (state.localInbox.length !== before) notify();
+}
+
+function getInboxServer() {
+  return { url: state.inboxServer.url, code: state.inboxServer.code };
+}
+
+function setInboxServer(url, code) {
+  state.inboxServer = {
+    url: String(url == null ? '' : url).trim().replace(/\/+$/, ''),
+    code: String(code == null ? '' : code).trim(),
+  };
+  notify();
+}
+
 export default {
   getSnapshot,
   subscribe,
@@ -304,4 +387,15 @@ export default {
   toggleTodoDone,
   applyPull,
   pruneJournalAfterPush,
+  // 收集箱
+  getLocalInbox,
+  getPendingInbox,
+  getPendingInboxCount,
+  addInboxItem,
+  updateInboxItem,
+  removeInboxItem,
+  markInboxSynced,
+  clearSyncedInbox,
+  getInboxServer,
+  setInboxServer,
 };

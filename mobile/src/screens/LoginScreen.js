@@ -21,7 +21,7 @@ import api from '../api';
 import store from '../store';
 import syncClient from '../syncClient';
 
-export default function LoginScreen() {
+export default function LoginScreen({ navigation }) {
   const [serverUrl, setServerUrl] = useState(api.DEFAULT_SERVER_URL);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -46,6 +46,8 @@ export default function LoginScreen() {
       store.setSession({ token: res.token, user: res.user, serverUrl });
       // 首次全量拉取（since=0），后台执行；结果在「我的」页可见
       syncClient.syncNow();
+      // 登录页是模态页：成功后关闭，回到主界面
+      if (navigation && navigation.canGoBack()) navigation.goBack();
     } catch (e) {
       setError(e && e.message ? e.message : '网络错误，请检查服务器地址');
     } finally {
