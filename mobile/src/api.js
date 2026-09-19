@@ -17,11 +17,13 @@ const DEFAULT_SERVER_URL = 'http://192.168.1.100:8787';
 
 const REQUEST_TIMEOUT_MS = 15000;
 
-// 去掉末尾斜杠，避免路径拼接出双斜杠
+// 规范化服务器地址：去末尾斜杠 + 自动补 http:// 前缀（用户常只填 IP:端口）
 function normalizeBaseUrl(url) {
   let u = String(url == null ? '' : url).trim();
   if (!u) u = DEFAULT_SERVER_URL;
-  return u.replace(/\/+$/, '');
+  u = u.replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u;
 }
 
 // 通用请求：JSON 收发 + 超时（AbortController）

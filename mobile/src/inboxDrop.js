@@ -10,7 +10,11 @@ const REQUEST_TIMEOUT_MS = 15000;
 const PING_TIMEOUT_MS = 5000;
 
 function normalizeUrl(url) {
-  return String(url == null ? '' : url).trim().replace(/\/+$/, '');
+  let u = String(url == null ? '' : url).trim().replace(/\/+$/, '');
+  if (!u) return '';
+  // 用户常只填「IP:端口」，自动补 http:// （内嵌同步服务是 http），避免 fetch 拿到无效 URL
+  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+  return u;
 }
 
 /**
