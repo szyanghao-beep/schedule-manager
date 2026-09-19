@@ -143,6 +143,35 @@ const BOOKKEEPING_DEFAULT_CATEGORIES = [
 const MEMORIAL_KINDS = ['birthday', 'anniversary', 'other'];
 const MEMORIAL_KIND_LABEL = { birthday: '生日', anniversary: '纪念日', other: '其他' };
 
+// ---- 2.3.2：客户商机跟进 ----
+// 商机阶段（按推进顺序排列；won / lost 为终态）
+const CUSTOMER_STAGES = ['lead', 'needs', 'demo', 'quote', 'negotiate', 'won', 'lost'];
+const CUSTOMER_STAGE_LABEL = {
+  lead: '发现商机', needs: '需求沟通', demo: '系统演示',
+  quote: '商务报价', negotiate: '合同谈判', won: '赢单', lost: '输单',
+};
+const CUSTOMER_STAGE_COLOR = {
+  lead: '#8a8f98', needs: '#4f8ef7', demo: '#8e6fd8',
+  quote: '#f2a541', negotiate: '#e0863c', won: '#4caf7d', lost: '#c0796b',
+};
+const CUSTOMER_ACTIVE_STAGES = ['lead', 'needs', 'demo', 'quote', 'negotiate']; // 推进中
+const CUSTOMER_CLOSED_STAGES = ['won', 'lost'];                               // 终态
+
+// 跟进方式
+const FOLLOWUP_METHODS = ['phone', 'wechat', 'visit', 'email', 'demo', 'other'];
+const FOLLOWUP_METHOD_LABEL = {
+  phone: '电话', wechat: '微信', visit: '拜访', email: '邮件', demo: '演示', other: '其他',
+};
+const FOLLOWUP_METHOD_ICON = {
+  phone: '📞', wechat: '💬', visit: '🤝', email: '✉️', demo: '🖥️', other: '📝',
+};
+
+// 金额记录类型：预估（可多次调整）/ 落单（确认成交，仅一次）/ 增购（可多次累加）
+const AMOUNT_KIND = { ESTIMATE: 'estimate', DEAL: 'deal', UPSELL: 'upsell' };
+const AMOUNT_KIND_LABEL = { estimate: '预估', deal: '落单确认', upsell: '增购' };
+
+const FOLLOWUP_TODO_MINUTES = 30; // 跟进待办默认预估耗时（分钟）
+
 module.exports = {
   STATUS,
   STATUS_LABEL,
@@ -176,4 +205,15 @@ module.exports = {
   BOOKKEEPING_DEFAULT_CATEGORIES,
   MEMORIAL_KINDS,
   MEMORIAL_KIND_LABEL,
+  CUSTOMER_STAGES,
+  CUSTOMER_STAGE_LABEL,
+  CUSTOMER_STAGE_COLOR,
+  CUSTOMER_ACTIVE_STAGES,
+  CUSTOMER_CLOSED_STAGES,
+  FOLLOWUP_METHODS,
+  FOLLOWUP_METHOD_LABEL,
+  FOLLOWUP_METHOD_ICON,
+  AMOUNT_KIND,
+  AMOUNT_KIND_LABEL,
+  FOLLOWUP_TODO_MINUTES,
 };

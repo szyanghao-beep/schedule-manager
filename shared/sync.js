@@ -21,6 +21,8 @@ const ENTITY_TYPES = {
   EVENT: 'event',
   TODO: 'todo',
   SETTING: 'setting',
+  CUSTOMER: 'customer',   // 2.3.2：客户商机
+  FOLLOWUP: 'followup',   // 2.3.2：跟进记录
 };
 
 // 取记录时间戳（兼容旧记录缺少 updatedAt 的情况）

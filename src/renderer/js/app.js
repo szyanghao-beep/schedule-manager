@@ -7,6 +7,7 @@ window.App = (function () {
   const MODULES = {
     schedule: window.Modules.schedule,
     todo: window.Modules.todo,
+    customer: window.Modules.customer,
     plan: window.Modules.plan,
     inbox: window.Modules.inbox,
     review: window.Modules.review,

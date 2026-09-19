@@ -20,6 +20,8 @@ window.Store = (function () {
     bookkeepingCategories: [],
     budgets: [],
     memorials: [],
+    customers: [],  // 2.3.2 客户商机（含 amountHistory 金额流水 / stageHistory 阶段留痕）
+    followups: [],  // 2.3.2 跟进记录
   };
 
   const listeners = [];
@@ -41,6 +43,8 @@ window.Store = (function () {
       bookkeepingCategories: alive(state.bookkeepingCategories),
       budgets: alive(state.budgets),
       memorials: alive(state.memorials),
+      customers: alive(state.customers),
+      followups: alive(state.followups),
     };
   }
 
@@ -226,6 +230,135 @@ window.Store = (function () {
     if (m) { m.deleted = true; touch(m); commit(); }
   }
 
+  // ---- 客户商机（2.3.2）----
+  const CU = window.CustomerUtil;
+
+  function addCustomer(c) {
+    const now = Date.now();
+    const rec = Object.assign({
+      stage: 'lead',
+      contact: '', phone: '', owner: '', remark: '',
+      amountHistory: [],
+      stageHistory: [{ stage: 'lead', at: now }], // 初始阶段留痕
+      createdAt: now,
+    }, c);
+    touch(rec);
+    state.customers.push(rec);
+    commit();
+    return rec;
+  }
+
+  function updateCustomer(id, patch) {
+    const c = state.customers.find(function (x) { return x.id === id && !x.deleted; });
+    if (!c) return null;
+    // 阶段变更走 changeStage，保证 stageHistory 留痕
+    if (patch && patch.stage && patch.stage !== c.stage) {
+      const changed = CU.changeStage(c, patch.stage, Date.now());
+      Object.assign(c, changed);
+      const rest = Object.assign({}, patch);
+      delete rest.stage;
+      Object.assign(c, rest);
+    } else {
+      Object.assign(c, patch);
+    }
+    touch(c);
+    commit();
+    return c;
+  }
+
+  function deleteCustomer(id) {
+    const c = state.customers.find(function (x) { return x.id === id && !x.deleted; });
+    if (!c) return;
+    c.deleted = true;
+    touch(c);
+    // 级联软删除该客户的跟进记录
+    state.followups.forEach(function (f) {
+      if (f.customerId === id && !f.deleted) { f.deleted = true; touch(f); }
+    });
+    // 未完成的跟进待办一并软删除
+    state.todos.forEach(function (t) {
+      if (t.customerId === id && t.followupTag && !t.deleted && t.status !== 'done') {
+        t.deleted = true; touch(t);
+      }
+    });
+    commit();
+  }
+
+  // 调整金额（预估可多次；落单仅一次；增购需已赢单）
+  function addCustomerAmount(id, entry) {
+    const c = state.customers.find(function (x) { return x.id === id && !x.deleted; });
+    if (!c) return null;
+    if (entry && entry.kind === 'upsell' && !CU.canUpsell(c)) return null; // 未赢单不能增购
+    const updated = CU.addAmount(c, entry || {});
+    if (updated === c) return null; // 被拒绝（非法值 / 重复落单）
+    Object.assign(c, updated);
+    touch(c);
+    commit();
+    return c;
+  }
+
+  // ---- 跟进记录（核心业务：记录跟进 → 自动生成/更新「跟进待办」）----
+  function recordFollowup(customerId, data) {
+    const c = state.customers.find(function (x) { return x.id === customerId && !x.deleted; });
+    if (!c) return null;
+    const now = Date.now();
+    const d = data || {};
+
+    const fu = {
+      id: d.id || window.Utils.genId(),
+      customerId: customerId,
+      at: d.at != null ? d.at : now,
+      method: d.method || 'phone',
+      content: d.content ? String(d.content).slice(0, 2000) : '',
+      nextAt: d.nextAt != null ? d.nextAt : null, // ★ 下次跟进时间
+      nextPlan: d.nextPlan ? String(d.nextPlan).slice(0, 500) : '',
+    };
+    touch(fu);
+    state.followups.push(fu);
+
+    // 自动生成／更新跟进待办：deadline = 下次跟进时间 → 直接复用待办提醒与规划能力
+    let todo = null;
+    if (fu.nextAt != null) {
+      const existing = state.todos.find(function (t) {
+        return t.customerId === customerId && t.followupTag && !t.deleted && t.status !== 'done';
+      });
+      const built = CU.buildFollowupTodo(c, fu, { now: now });
+      if (existing) {
+        existing.title = built.title;
+        existing.description = built.description;
+        existing.deadline = built.deadline;
+        existing.followupId = fu.id;
+        touch(existing);
+        todo = existing;
+      } else {
+        touch(built);
+        state.todos.push(built);
+        todo = built;
+      }
+      fu.todoId = todo.id;
+    }
+
+    commit();
+    return { followup: fu, todo: todo };
+  }
+
+  function updateFollowup(id, patch) {
+    const f = state.followups.find(function (x) { return x.id === id && !x.deleted; });
+    if (!f) return null;
+    Object.assign(f, patch);
+    touch(f);
+    commit();
+    return f;
+  }
+
+  function deleteFollowup(id) {
+    const f = state.followups.find(function (x) { return x.id === id && !x.deleted; });
+    if (!f) return;
+    f.deleted = true;
+    touch(f);
+    commit();
+  }
+
   return {
     get: get,
     getRaw: getRaw,
@@ -257,5 +390,12 @@ window.Store = (function () {
     addMemorial: addMemorial,
     updateMemorial: updateMemorial,
     deleteMemorial: deleteMemorial,
+    addCustomer: addCustomer,
+    updateCustomer: updateCustomer,
+    deleteCustomer: deleteCustomer,
+    addCustomerAmount: addCustomerAmount,
+    recordFollowup: recordFollowup,
+    updateFollowup: updateFollowup,
+    deleteFollowup: deleteFollowup,
   };
 })();

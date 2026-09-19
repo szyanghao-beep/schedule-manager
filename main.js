@@ -80,6 +80,8 @@ function defaultData() {
     bookkeepingCategories: [], // 2.3.0 记账分类（独立于日程分类）
     budgets: [], // 2.3.0 预算
     memorials: [], // 2.3.0 生日/纪念日
+    customers: [], // 2.3.2 客户商机（含金额流水 amountHistory / 阶段留痕 stageHistory）
+    followups: [], // 2.3.2 跟进记录（每次跟进 + 下次跟进时间）
     notified: {}, // key(occurrence) -> 通知时间戳，用于去重
     snoozed: {}, // key -> { kind, id, title, at }，稍后提醒（到点重弹）
     emailLastSentDate: '', // 每日邮件上次发送日期（YYYY-MM-DD），用于当天去重
@@ -186,6 +188,8 @@ function publicData() {
     bookkeepingCategories: data.bookkeepingCategories || [],
     budgets: data.budgets || [],
     memorials: data.memorials || [],
+    customers: data.customers || [],
+    followups: data.followups || [],
   };
 }
 
@@ -557,7 +561,9 @@ function buildLocalChanges(since) {
   const changes = []
     .concat(sync.extractLocalChanges(data.categories, sync.ENTITY_TYPES.CATEGORY, since))
     .concat(sync.extractLocalChanges(data.events, sync.ENTITY_TYPES.EVENT, since))
-    .concat(sync.extractLocalChanges(data.todos, sync.ENTITY_TYPES.TODO, since));
+    .concat(sync.extractLocalChanges(data.todos, sync.ENTITY_TYPES.TODO, since))
+    .concat(sync.extractLocalChanges(data.customers || [], sync.ENTITY_TYPES.CUSTOMER, since))
+    .concat(sync.extractLocalChanges(data.followups || [], sync.ENTITY_TYPES.FOLLOWUP, since));
   // settings 作为单条 SETTING 记录同步（只同步共享偏好：紧急阈值 / 默认提醒）
   if (data.settingsMeta && data.settingsMeta.localModifiedAt > since) {
     changes.push({
@@ -592,6 +598,8 @@ function applyRemoteChanges(changes) {
   sync.recordsToMap(data.categories, sync.ENTITY_TYPES.CATEGORY).forEach(function (v, k) { map.set(k, v); });
   sync.recordsToMap(data.events, sync.ENTITY_TYPES.EVENT).forEach(function (v, k) { map.set(k, v); });
   sync.recordsToMap(data.todos, sync.ENTITY_TYPES.TODO).forEach(function (v, k) { map.set(k, v); });
+  sync.recordsToMap(data.customers || [], sync.ENTITY_TYPES.CUSTOMER).forEach(function (v, k) { map.set(k, v); });
+  sync.recordsToMap(data.followups || [], sync.ENTITY_TYPES.FOLLOWUP).forEach(function (v, k) { map.set(k, v); });
 
   // 合并前快照「本地已修改（localModifiedAt>0）」记录的指纹，合并后比对，
   // 若内容被远程版本替换即视为冲突（用户本地编辑被别的设备覆盖）。
@@ -606,6 +614,8 @@ function applyRemoteChanges(changes) {
   data.categories = sync.liveRecords(map, sync.ENTITY_TYPES.CATEGORY);
   data.events = sync.liveRecords(map, sync.ENTITY_TYPES.EVENT);
   data.todos = sync.liveRecords(map, sync.ENTITY_TYPES.TODO);
+  data.customers = sync.liveRecords(map, sync.ENTITY_TYPES.CUSTOMER);
+  data.followups = sync.liveRecords(map, sync.ENTITY_TYPES.FOLLOWUP);
 
   const conflicts = [];
   dirty.forEach(function (before, key) {
@@ -879,6 +889,8 @@ function registerIpc() {
       if (Array.isArray(payload.bookkeepingCategories)) data.bookkeepingCategories = payload.bookkeepingCategories;
       if (Array.isArray(payload.budgets)) data.budgets = payload.budgets;
       if (Array.isArray(payload.memorials)) data.memorials = payload.memorials;
+      if (Array.isArray(payload.customers)) data.customers = payload.customers;
+      if (Array.isArray(payload.followups)) data.followups = payload.followups;
       if (payload.settings && typeof payload.settings === 'object') {
         const merged = Object.assign(defaultData().settings, payload.settings);
         merged.emailReminder = Object.assign(defaultData().settings.emailReminder, payload.settings.emailReminder || {});
