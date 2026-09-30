@@ -23,6 +23,8 @@
 
   const { CUSTOMER_STAGES, CUSTOMER_CLOSED_STAGES, AMOUNT_KIND, FOLLOWUP_TODO_MINUTES } = C;
 
+const DAY = 86400000; // 一天的毫秒数（阶段停留时长、跟进分桶共用）
+
 // ---------- 金额流水 ----------
 // 派生当前金额视图：预估取最新一条；成交 = 落单 + 增购累计
 function amountSummary(customer) {
@@ -115,7 +117,6 @@ function stageDurations(customer, now) {
   const hist = (customer && Array.isArray(customer.stageHistory)) ? customer.stageHistory : [];
   if (!hist.length) return [];
   const end = now || Date.now();
-  const DAY = 86400000;
   return hist.map(function (h, i) {
     const nextAt = (i + 1 < hist.length) ? hist[i + 1].at : end;
     return {
@@ -201,6 +202,80 @@ function groupByStage(customers) {
   return out;
 }
 
+// ---------- 团队视角（多人共用商机库） ----------
+// 负责人清单：去重、去空白、按拼音/字面排序，供筛选下拉与表单候选使用
+function ownerList(customers) {
+  const seen = {};
+  (customers || []).forEach(function (c) {
+    const o = String((c && c.owner) || '').trim();
+    if (o) seen[o] = true;
+  });
+  return Object.keys(seen).sort(function (a, b) { return a.localeCompare(b, 'zh-CN'); });
+}
+
+// 按负责人筛选：owner 为 '' 时表示「未分配」
+function filterByOwner(customers, owner) {
+  const want = String(owner == null ? '' : owner).trim();
+  return (customers || []).filter(function (c) {
+    return String((c && c.owner) || '').trim() === want;
+  });
+}
+
+// 搜索：名称 / 联系人 / 电话 / 负责人 / 备注 模糊匹配（忽略大小写与首尾空白）
+function searchCustomers(customers, keyword) {
+  const kw = String(keyword == null ? '' : keyword).trim().toLowerCase();
+  if (!kw) return (customers || []).slice();
+  return (customers || []).filter(function (c) {
+    if (!c) return false;
+    const hay = [c.name, c.contact, c.phone, c.owner, c.remark]
+      .map(function (v) { return String(v == null ? '' : v).toLowerCase(); })
+      .join('\u0001');
+    return hay.indexOf(kw) >= 0;
+  });
+}
+
+// 跟进分桶 —— 团队每天要回答的问题是「今天该跟谁」：
+//   overdue 已逾期未跟进 / today 今天 / week 本周内 / none 尚未安排下次跟进 / later 本周之后
+function followupBuckets(customers, followups, now) {
+  const t = now || Date.now();
+  const out = { overdue: [], today: [], week: [], later: [], none: [] };
+  (customers || []).forEach(function (c) {
+    if (isClosed(c)) return; // 已赢单/输单不再催跟进
+    const next = nextFollowupAt(c, followups);
+    if (next == null) { out.none.push(c); return; }
+    if (next < t) { out.overdue.push(c); return; }
+    const days = (next - t) / DAY;
+    if (days < 1) out.today.push(c);
+    else if (days <= 7) out.week.push(c);
+    else out.later.push(c);
+  });
+  return out;
+}
+
+// 按负责人的团队汇总：谁在谈多少、预估多大、成交多少、几个该跟进
+function summarizeByOwner(customers, followups, now) {
+  const owners = ownerList(customers);
+  const unassigned = (customers || []).filter(function (c) { return !String((c && c.owner) || '').trim(); });
+  const groups = owners.map(function (o) { return { owner: o, list: filterByOwner(customers, o) }; });
+  if (unassigned.length) groups.push({ owner: '', list: unassigned });
+
+  return groups.map(function (g) {
+    const s = summarize(g.list);
+    const b = followupBuckets(g.list, followups, now);
+    return {
+      owner: g.owner,
+      total: g.list.length,
+      activeCount: s.activeCount,
+      wonCount: s.wonCount,
+      expectedTotal: s.expectedTotal,
+      wonTotal: s.wonTotal,
+      overdueCount: b.overdue.length,
+      dueTodayCount: b.today.length,
+      noNextCount: b.none.length,
+    };
+  });
+}
+
 // 汇总：各阶段数量/预估金额、成交汇总（漏斗与业绩两套口径分开）
 function summarize(customers) {
   const byStage = {};
@@ -249,5 +324,10 @@ function summarize(customers) {
     sortCustomers: sortCustomers,
     groupByStage: groupByStage,
     summarize: summarize,
+    ownerList: ownerList,
+    filterByOwner: filterByOwner,
+    searchCustomers: searchCustomers,
+    followupBuckets: followupBuckets,
+    summarizeByOwner: summarizeByOwner,
   };
 }));

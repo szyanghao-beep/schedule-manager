@@ -3,9 +3,9 @@
  *
  * 职责：
  *   - 启动时从 AsyncStorage 恢复本地数据（store.load），加载期间显示 Splash；
- *   - 主界面底部 Tab：收集 / 日程 / 待办 / 我的；
+ *   - 主界面底部 Tab：收集 / 日程 / 待办 / 客户 / 我的；
  *     ★「收集」页免登录可用（离线随手记 → 手动直传电脑收件箱），
- *       日程/待办/我的需要登录同步账号（未登录时在「我的」页登录）；
+ *       日程/待办/客户/我的需要登录同步账号（未登录时在「我的」页登录）；
  *   - 启动后：注册自动推送（startAutoPush），已有 token 时立即同步一次。
  */
 import React, { useEffect } from 'react';
@@ -23,6 +23,8 @@ import LoginScreen from './src/screens/LoginScreen';
 import CollectScreen from './src/screens/CollectScreen';
 import EventsScreen from './src/screens/EventsScreen';
 import TodosScreen from './src/screens/TodosScreen';
+import CustomersScreen from './src/screens/CustomersScreen';
+import CustomerDetailScreen from './src/screens/CustomerDetailScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import EventForm from './src/components/EventForm';
 import TodoForm from './src/components/TodoForm';
@@ -57,6 +59,11 @@ function MainTabs() {
         name="Todos"
         component={TodosScreen}
         options={{ title: '待办', tabBarIcon: makeTabIcon('✅') }}
+      />
+      <Tab.Screen
+        name="Customers"
+        component={CustomersScreen}
+        options={{ title: '客户', headerShown: false, tabBarIcon: makeTabIcon('🤝') }}
       />
       <Tab.Screen
         name="Profile"
@@ -98,6 +105,11 @@ function Root() {
           name="TodoForm"
           component={TodoForm}
           options={{ presentation: 'modal', title: '待办' }}
+        />
+        <Stack.Screen
+          name="CustomerDetail"
+          component={CustomerDetailScreen}
+          options={{ presentation: 'modal', title: '客户' }}
         />
       </Stack.Navigator>
     </NavigationContainer>

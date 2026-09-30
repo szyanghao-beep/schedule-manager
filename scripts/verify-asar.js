@@ -60,13 +60,28 @@ console.log('== 关键运行时文件 ==');
   'main.js', 'preload.js', 'package.json',
   'server/src/app.js', 'server/src/db.js', 'server/src/inboxDrop.js', 'server/src/auth.js', 'server/src/syncRoutes.js',
   'shared/utils.js', 'shared/constants.js', 'shared/sync.js', 'shared/inbox.js', 'shared/customer.js',
+  // links.js 提供 window.LinkUtil（收件箱/待办/日程的关联判定）。
+  // 若它没进包，渲染层读 LinkUtil 会是 undefined，待办与收件箱页直接报错。
+  'shared/links.js',
   'src/renderer/index.html',
   'src/renderer/js/api.js', 'src/renderer/js/store.js', 'src/renderer/js/app.js',
   'src/renderer/js/modules/customer.js', 'src/renderer/js/modules/settings.js',
+  'src/renderer/js/modules/inbox.js', 'src/renderer/js/modules/todo.js', 'src/renderer/js/modules/schedule.js',
   'build/icon.png',
 ].forEach(function (f) {
   check(f, set.has(f));
 });
+
+// index.html 必须真的引用了这些 shared 脚本，否则运行时全局变量不存在
+console.log('');
+console.log('== index.html 的 shared 脚本引用 ==');
+const htmlSrc = readFile('src/renderer/index.html');
+check('能读取 index.html', !!htmlSrc);
+if (htmlSrc) {
+  ['shared/utils.js', 'shared/customer.js', 'shared/links.js'].forEach(function (s) {
+    check('index.html 引用 ' + s, htmlSrc.indexOf(s) >= 0);
+  });
+}
 
 console.log('');
 console.log('== 生产依赖（内嵌服务器 / 农历 / 邮件）==');

@@ -9,15 +9,24 @@ window.Modules.inbox = (function () {
   const C = window.API.constants;
   const el = window.Dom.el;
   const clear = window.Dom.clear;
+  const L = window.LinkUtil;
+
+  // 批量整理用的选中集合（手机一次收集几十条时，逐条整理是最大的痛点）
+  let selected = {};
 
   function inboxTodos() {
-    return Store.get().todos.filter(function (t) { return t.status !== 'done' && t.deadline == null; });
+    return L.inboxTodos(Store.get().todos);
   }
 
   function render() {
     const root = document.getElementById('view-inbox');
     clear(root);
     const items = inboxTodos();
+
+    // 清理已不在收件箱里的选中项（被整理/完成后不应再算作已选）
+    const aliveIds = {};
+    items.forEach(function (t) { aliveIds[t.id] = true; });
+    Object.keys(selected).forEach(function (id) { if (!aliveIds[id]) delete selected[id]; });
 
     const header = el('div', 'panel-header');
     header.appendChild(el('div', 'panel-title', '收件箱（未整理）'));
@@ -32,20 +41,113 @@ window.Modules.inbox = (function () {
     hint.style.marginBottom = '12px';
     root.appendChild(hint);
 
+    // 来源说明：手机收集的条目会被标出来，避免「不知道这条哪来的」
+    const mobileCount = items.filter(function (t) { return L.sourceLabel(t); }).length;
+    if (mobileCount) {
+      const srcLine = el('div', 'item-meta', '其中 ' + mobileCount + ' 条来自手机「收集」直传');
+      srcLine.style.marginBottom = '8px';
+      srcLine.style.color = 'var(--primary)';
+      root.appendChild(srcLine);
+    }
+
+    if (items.length) root.appendChild(selectBar(items));
+    if (Object.keys(selected).length > 0) root.appendChild(batchBar());
+
     const list = el('div');
     if (!items.length) list.appendChild(el('div', 'placeholder', '收件箱是空的，按 Ctrl+Shift+N 快速捕捉一条想法'));
     items.forEach(function (t) { list.appendChild(inboxRow(t)); });
     root.appendChild(list);
   }
 
+  // 全选 / 反选
+  function selectBar(items) {
+    const bar = el('div', 'toolbar');
+    const allSelected = items.every(function (t) { return selected[t.id]; });
+    const btn = el('button', 'btn btn-sm', allSelected ? '取消全选' : '全选（' + items.length + '）');
+    btn.addEventListener('click', function () {
+      if (allSelected) selected = {};
+      else items.forEach(function (t) { selected[t.id] = true; });
+      render();
+    });
+    bar.appendChild(btn);
+    return bar;
+  }
+
+  // 批量整理：一次给多条定截止时间 / 完成 / 删除，不用逐条开弹窗
+  function batchBar() {
+    const ids = Object.keys(selected);
+    const bar = el('div', 'toolbar');
+    bar.appendChild(el('span', 'item-meta', '已选 ' + ids.length + ' 条：'));
+
+    function setDeadlineAt(ts, label) {
+      ids.forEach(function (id) {
+        // 给了截止时间就自动离开收件箱 —— 这正是「整理」的本质动作
+        Store.updateTodo(id, { deadline: ts });
+      });
+      selected = {};
+      window.Toast.success('已把 ' + ids.length + ' 条设为' + label);
+    }
+
+    const todayBtn = el('button', 'btn btn-sm btn-primary', '设为今天');
+    todayBtn.title = '截止时间设为今天 23:59，并移出收件箱';
+    todayBtn.addEventListener('click', function () {
+      const d = new Date();
+      setDeadlineAt(window.Utils.parseDateTime(window.Utils.toDateStr(d.getTime()), '23:59'), '今天截止');
+    });
+    const tomorrowBtn = el('button', 'btn btn-sm', '设为明天');
+    tomorrowBtn.addEventListener('click', function () {
+      const d = new Date(Date.now() + 86400000);
+      setDeadlineAt(window.Utils.parseDateTime(window.Utils.toDateStr(d.getTime()), '23:59'), '明天截止');
+    });
+    const doneBtn = el('button', 'btn btn-sm', '标为已完成');
+    doneBtn.addEventListener('click', function () {
+      Store.updateTodos(ids, { status: 'done', completedAt: Date.now() });
+      selected = {};
+      window.Toast.success('已标记 ' + ids.length + ' 条完成');
+    });
+    const delBtn = el('button', 'btn btn-sm btn-danger', '删除');
+    delBtn.addEventListener('click', function () {
+      if (!confirm('确定删除选中的 ' + ids.length + ' 条？')) return;
+      Store.deleteTodos(ids);
+      selected = {};
+      window.Toast.success('已删除');
+    });
+
+    bar.appendChild(todayBtn);
+    bar.appendChild(tomorrowBtn);
+    bar.appendChild(doneBtn);
+    bar.appendChild(delBtn);
+    return bar;
+  }
+
   function inboxRow(t) {
     const row = el('div', 'item');
+
+    // 批量整理用的勾选框
+    const sel = el('input', 'item-check');
+    sel.type = 'checkbox';
+    sel.checked = !!selected[t.id];
+    sel.title = '选择（用于批量整理）';
+    sel.addEventListener('change', function () {
+      if (sel.checked) selected[t.id] = true; else delete selected[t.id];
+      render();
+    });
+
     const main = el('div', 'item-main');
     const title = el('div', 'item-title');
     const dot = el('span', 'dot');
     dot.style.background = t.categoryColor || '#8a8f98';
     title.appendChild(dot);
     title.appendChild(document.createTextNode(t.title));
+    // 来源徽标：手机收集来的要能一眼认出（也解释了为什么这条没截止时间）
+    const src = L.sourceLabel(t);
+    if (src) {
+      const b = el('span', 'badge', src);
+      b.style.marginLeft = '8px';
+      b.style.background = 'var(--primary)';
+      b.style.color = '#fff';
+      title.appendChild(b);
+    }
     main.appendChild(title);
     const meta = el('div', 'item-meta');
     const parts = ['捕捉于 ' + (t.createdAt ? window.Utils.toDateTimeStr(t.createdAt) : '—')];
@@ -68,6 +170,7 @@ window.Modules.inbox = (function () {
     side.appendChild(doneBtn);
     side.appendChild(delBtn);
 
+    row.appendChild(sel);
     row.appendChild(main);
     row.appendChild(side);
     row.addEventListener('dblclick', function () { window.Modules.todo.openTodoForm(t); });

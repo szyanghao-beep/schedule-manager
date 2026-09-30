@@ -297,6 +297,21 @@ window.Modules.schedule = (function () {
     dot.style.background = ev.categoryColor || '#8a8f98';
     title.appendChild(dot);
     title.appendChild(document.createTextNode(ev.title));
+    // 这个时间块是从待办「排到日程」来的吗？标出来并可直接跳回待办
+    const srcTodo = (window.LinkUtil ? window.LinkUtil.eventToTodoIndex(Store.get().todos) : {})[ev.id];
+    if (srcTodo) {
+      const b = el('span', 'badge', '来自待办');
+      b.style.marginLeft = '8px';
+      b.style.background = '#4f8ef7';
+      b.style.color = '#fff';
+      b.title = '由待办「' + srcTodo.title + '」排程而来，点此处跳到待办';
+      b.style.cursor = 'pointer';
+      b.addEventListener('click', function (e) {
+        e.stopPropagation();
+        window.App.switchView('todo');
+      });
+      title.appendChild(b);
+    }
     main.appendChild(title);
     if (ev.description) main.appendChild(el('div', 'item-meta', ev.description));
     row.appendChild(time);

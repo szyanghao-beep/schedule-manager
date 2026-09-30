@@ -114,6 +114,9 @@ window.Utils = require(path.join(ROOT, 'shared', 'utils.js'));
 window.Nlp = require(path.join(ROOT, 'shared', 'nlp.js'));
 window.LunarUtil = require(path.join(ROOT, 'shared', 'lunar.js'));
 window.Bookkeeping = require(path.join(ROOT, 'shared', 'bookkeeping.js'));
+// 渲染层会用到客户与「收件箱→待办→日程」关联的纯函数（与 index.html 的加载顺序一致）
+window.CustomerUtil = require(path.join(ROOT, 'shared', 'customer.js'));
+window.LinkUtil = require(path.join(ROOT, 'shared', 'links.js'));
 
 // 暴露给渲染进程的主进程 API 桩（api.js 会据此构造 window.API）
 window.api = {

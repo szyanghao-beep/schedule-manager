@@ -6,6 +6,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const cust = require('../shared/customer.js');
 
+const DAY = 86400000;
+// 固定「当前时间」，避免测试随真实时间漂移
+const NOW = new Date('2026-03-10T10:00:00').getTime();
+
 function mkCustomer(over) {
   return Object.assign({
     id: 'c1', name: '张三', contact: '张总', stage: 'lead',
@@ -167,4 +171,93 @@ test('groupByStage：按阶段分组，空阶段也在', function () {
   assert.strictEqual(g.demo.length, 1);
   assert.strictEqual(g.won.length, 0);
   assert.ok(g.lead);
+});
+
+// ---------------- 团队视角（多人共用商机库） ----------------
+// 场景：一个团队共用同一份商机库，必须能回答「谁负责哪些客户」「今天该跟谁」。
+
+function teamCustomers() {
+  return [
+    mkCustomer({ id: 'a', name: '张三公司', contact: '张三', phone: '13800000001', owner: '李四', stage: 'lead' }),
+    mkCustomer({ id: 'b', name: 'Beta科技', contact: 'Bob', phone: '13900000002', owner: '王五', stage: 'negotiating' }),
+    mkCustomer({ id: 'c', name: 'Gamma', contact: 'C', phone: '13700000003', owner: '', stage: 'won',
+      amountHistory: [{ kind: 'deal', amount: 80000, at: NOW }] }),
+  ];
+}
+
+test('ownerList：去重、去空白、不含空负责人，供筛选下拉使用', function () {
+  const cs = teamCustomers().concat([mkCustomer({ id: 'd', owner: '  李四  ' })]);
+  assert.deepStrictEqual(cust.ownerList(cs), ['李四', '王五']);
+  assert.deepStrictEqual(cust.ownerList([]), []);
+});
+
+test('filterByOwner：按负责人筛选，空串表示「未分配」', function () {
+  const cs = teamCustomers();
+  assert.deepStrictEqual(cust.filterByOwner(cs, '李四').map(function (c) { return c.id; }), ['a']);
+  assert.deepStrictEqual(cust.filterByOwner(cs, '').map(function (c) { return c.id; }), ['c']);
+  assert.deepStrictEqual(cust.filterByOwner(cs, '不存在的人'), []);
+});
+
+test('searchCustomers：名称/联系人/电话/负责人 均可命中，且忽略大小写', function () {
+  const cs = teamCustomers();
+  assert.deepStrictEqual(cust.searchCustomers(cs, '张三').map(function (c) { return c.id; }), ['a']);
+  assert.deepStrictEqual(cust.searchCustomers(cs, 'BETA').map(function (c) { return c.id; }), ['b'], '应忽略大小写');
+  assert.deepStrictEqual(cust.searchCustomers(cs, '13700000003').map(function (c) { return c.id; }), ['c'], '应支持按电话搜');
+  assert.deepStrictEqual(cust.searchCustomers(cs, '王五').map(function (c) { return c.id; }), ['b'], '应支持按负责人搜');
+  assert.strictEqual(cust.searchCustomers(cs, '  ').length, 3, '空关键词返回全部');
+});
+
+test('followupBuckets：分出逾期/今天/本周/未安排，且已成交客户不再催跟进', function () {
+  const cs = teamCustomers();
+  const fus = [
+    { id: 'f1', customerId: 'a', at: NOW - 5 * DAY, nextAt: NOW - 2 * DAY },        // 逾期
+    { id: 'f2', customerId: 'b', at: NOW - DAY, nextAt: NOW + 3 * 3600 * 1000 },   // 今天
+  ];
+  const b = cust.followupBuckets(cs, fus, NOW);
+  assert.deepStrictEqual(b.overdue.map(function (c) { return c.id; }), ['a']);
+  assert.deepStrictEqual(b.today.map(function (c) { return c.id; }), ['b']);
+  assert.deepStrictEqual(b.none.map(function (c) { return c.id; }), [],
+    'c 已赢单属终态，不应出现在「未安排跟进」里');
+});
+
+test('followupBuckets：本周内与本周之后分开，未安排单独成桶', function () {
+  const cs = [
+    mkCustomer({ id: 'w', owner: '李四' }),
+    mkCustomer({ id: 'l', owner: '李四' }),
+    mkCustomer({ id: 'n', owner: '李四' }),
+  ];
+  const fus = [
+    { id: 'f1', customerId: 'w', at: NOW, nextAt: NOW + 3 * DAY },
+    { id: 'f2', customerId: 'l', at: NOW, nextAt: NOW + 20 * DAY },
+  ];
+  const b = cust.followupBuckets(cs, fus, NOW);
+  assert.deepStrictEqual(b.week.map(function (c) { return c.id; }), ['w']);
+  assert.deepStrictEqual(b.later.map(function (c) { return c.id; }), ['l']);
+  assert.deepStrictEqual(b.none.map(function (c) { return c.id; }), ['n']);
+});
+
+test('summarizeByOwner：按负责人给出在谈/成交/该跟进数量，含「未分配」一组', function () {
+  const cs = teamCustomers();
+  const fus = [
+    { id: 'f1', customerId: 'a', at: NOW - 5 * DAY, nextAt: NOW - 2 * DAY },
+    { id: 'f2', customerId: 'b', at: NOW - DAY, nextAt: NOW + 3 * 3600 * 1000 },
+  ];
+  const rows = cust.summarizeByOwner(cs, fus, NOW);
+  const byOwner = {};
+  rows.forEach(function (r) { byOwner[r.owner] = r; });
+
+  assert.deepStrictEqual(Object.keys(byOwner).sort(), ['', '李四', '王五'], '应有「未分配」分组');
+  assert.strictEqual(byOwner['李四'].activeCount, 1);
+  assert.strictEqual(byOwner['李四'].overdueCount, 1, '李四名下 1 个逾期未跟进');
+  assert.strictEqual(byOwner['王五'].dueTodayCount, 1, '王五名下 1 个今天该跟进');
+  assert.strictEqual(byOwner[''].wonCount, 1);
+  assert.strictEqual(byOwner[''].wonTotal, 80000, '未分配组的成交额也应统计到');
+});
+
+test('summarizeByOwner：无人分配时只返回「未分配」一组，不会凭空造出负责人', function () {
+  const cs = [mkCustomer({ id: 'x', owner: '' })];
+  const rows = cust.summarizeByOwner(cs, [], NOW);
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].owner, '');
+  assert.strictEqual(rows[0].total, 1);
 });

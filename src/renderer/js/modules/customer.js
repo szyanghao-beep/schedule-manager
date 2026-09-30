@@ -19,6 +19,11 @@ window.Modules.customer = (function () {
 
   let filterStage = 'active'; // active（推进中）| all | 具体阶段
   let detailId = null;        // 当前展开详情的客户 id
+  // 团队共用商机库：客户一多就必须能「搜」和「按人看」，否则只能靠翻列表
+  let keyword = '';           // 搜索关键词（名称/联系人/电话/负责人/备注）
+  let filterOwner = 'all';    // 'all' | ''（未分配）| 具体负责人
+  let bucket = '';            // '' 不按跟进时间筛 | overdue | today | week | none
+  let showTeam = false;       // 是否展开「按负责人」团队汇总
 
   // ---------- 工具 ----------
   function money(n) {
@@ -111,22 +116,138 @@ window.Modules.customer = (function () {
     sel.value = filterStage;
     sel.addEventListener('change', function () { filterStage = sel.value; render(); });
     bar.appendChild(sel);
+
+    // 搜索（团队共用商机库时，客户一多翻列表就找不着了）
+    const search = el('input');
+    search.type = 'search';
+    search.placeholder = '搜客户名称 / 联系人 / 电话 / 负责人';
+    search.style.width = '220px';
+    search.style.marginLeft = '8px';
+    search.value = keyword;
+    search.addEventListener('input', function () {
+      keyword = search.value;
+      render();
+      // render() 会重建 DOM，需把焦点与光标交还给新的搜索框，否则每敲一个字就丢焦点
+      const next = document.getElementById('customer-search');
+      if (next) { next.focus(); next.setSelectionRange(next.value.length, next.value.length); }
+    });
+    search.id = 'customer-search';
+    bar.appendChild(search);
+
+    // 负责人筛选（团队场景：只看自己负责的客户）
+    const owners = CU.ownerList(all);
+    let ownerOptions = [['all', '全部负责人']];
+    if (owners.length) ownerOptions = ownerOptions.concat(owners.map(function (o) { return [o, o]; }));
+    ownerOptions.push(['', '未分配']);
+    const ownerSel = el('select');
+    ownerSel.style.width = '140px';
+    ownerSel.style.marginLeft = '8px';
+    ownerOptions.forEach(function (p) {
+      const o = el('option'); o.value = p[0]; o.textContent = p[1]; ownerSel.appendChild(o);
+    });
+    ownerSel.value = filterOwner;
+    ownerSel.addEventListener('change', function () { filterOwner = ownerSel.value; render(); });
+    bar.appendChild(ownerSel);
+
+    const resetBtn = el('button', 'btn btn-sm', '重置');
+    resetBtn.style.marginLeft = '8px';
+    resetBtn.addEventListener('click', function () {
+      keyword = ''; filterOwner = 'all'; bucket = ''; filterStage = 'active'; render();
+    });
+    bar.appendChild(resetBtn);
     root.appendChild(bar);
 
-    // 列表
+    // 「今天该跟谁」工作台：直接回答团队每天的第一个问题
+    const bk = CU.followupBuckets(all, fus, now);
+    const chips = el('div', 'toolbar');
+    chips.style.marginTop = '8px';
+    chips.appendChild(el('span', 'item-meta', '跟进待办：'));
+    [['', '不限'], ['overdue', '已逾期 ' + bk.overdue.length], ['today', '今天 ' + bk.today.length],
+      ['week', '本周 ' + bk.week.length], ['none', '未安排 ' + bk.none.length]].forEach(function (p) {
+      const active = bucket === p[0];
+      const b = el('button', 'btn btn-sm' + (active ? ' btn-primary' : ''), p[1]);
+      b.addEventListener('click', function () { bucket = active ? '' : p[0]; render(); });
+      chips.appendChild(b);
+    });
+    root.appendChild(chips);
+
+    // 团队汇总（默认折叠，避免挤占列表空间）
+    const teamToggle = el('button', 'btn btn-sm', showTeam ? '收起团队汇总' : '团队汇总（按负责人）');
+    teamToggle.style.marginTop = '8px';
+    teamToggle.addEventListener('click', function () { showTeam = !showTeam; render(); });
+    root.appendChild(teamToggle);
+    if (showTeam) root.appendChild(teamTable(all, fus, now));
+
+    // 过滤链：阶段 → 负责人 → 跟进桶 → 关键词搜索（四者可叠加）
     let list = all;
-    if (filterStage === 'active') list = all.filter(function (c) { return !CU.isClosed(c); });
-    else if (filterStage !== 'all') list = all.filter(function (c) { return c.stage === filterStage; });
+    if (filterStage === 'active') list = list.filter(function (c) { return !CU.isClosed(c); });
+    else if (filterStage !== 'all') list = list.filter(function (c) { return c.stage === filterStage; });
+    if (filterOwner !== 'all') list = CU.filterByOwner(list, filterOwner);
+    if (bucket) list = bk[bucket].filter(function (c) { return list.indexOf(c) >= 0; });
+    list = CU.searchCustomers(list, keyword);
 
     const sorted = CU.sortCustomers(list, fus, now);
     const wrap = el('div');
+    wrap.style.marginTop = '8px';
     if (!sorted.length) {
-      wrap.appendChild(el('div', 'placeholder', '暂无客户，点右上角「+ 新增客户」开始'));
+      const filtered = !!(keyword || bucket || filterOwner !== 'all');
+      wrap.appendChild(el('div', 'placeholder',
+        filtered
+          ? '没有符合当前筛选条件的客户（可点「重置」清除条件）'
+          : '暂无客户，点右上角「+ 新增客户」开始'));
     } else {
       sorted.forEach(function (c) { wrap.appendChild(customerCard(c, fus, now)); });
     }
     root.appendChild(wrap);
   }
+
+  // ---------- 团队汇总：每个负责人一行（谁在谈多少、成交多少、几个该跟进） ----------
+  function teamTable(all, fus, now) {
+    const box = el('div', 'card');
+    box.style.marginTop = '8px';
+    box.appendChild(el('div', 'panel-title', '团队汇总（按负责人）'));
+    const rows = CU.summarizeByOwner(all, fus, now);
+    if (!rows.length) {
+      box.appendChild(el('div', 'placeholder', '暂无客户'));
+      return box;
+    }
+    rows.forEach(function (r) {
+      const line = el('div', 'item');
+      line.style.alignItems = 'center';
+      const main = el('div', 'item-main');
+      const title = el('div', 'item-title', r.owner || '（未分配）');
+      main.appendChild(title);
+      const meta = el('div', 'item-meta');
+      meta.textContent = '客户 ' + r.total + ' · 在谈 ' + r.activeCount + ' · 成交 ' + r.wonCount +
+        ' · 在谈预估 ' + money(r.expectedTotal) + ' · 累计成交 ' + money(r.wonTotal);
+      main.appendChild(meta);
+      line.appendChild(main);
+
+      const side = el('div', 'item-side');
+      // 该跟进却压着的数量——团队里最该被看到的一列
+      const warn = el('div', 'item-meta',
+        (r.overdueCount ? '逾期 ' + r.overdueCount + '　' : '') +
+        (r.dueTodayCount ? '今天 ' + r.dueTodayCount + '　' : '') +
+        (r.noNextCount ? '未安排 ' + r.noNextCount : ''));
+      if (r.overdueCount) warn.style.color = 'var(--danger)';
+      else if (r.dueTodayCount) warn.style.color = 'var(--warning)';
+      side.appendChild(warn);
+
+      if (r.owner) {
+        const only = el('button', 'btn btn-sm', '只看他');
+        only.addEventListener('click', function () { filterOwner = r.owner; render(); });
+        side.appendChild(only);
+      } else {
+        const only = el('button', 'btn btn-sm', '只看未分配');
+        only.addEventListener('click', function () { filterOwner = ''; render(); });
+        side.appendChild(only);
+      }
+      line.appendChild(side);
+      box.appendChild(line);
+    });
+    return box;
+  }
+
 
   // ---------- 客户卡片（含可展开详情） ----------
   function customerCard(c, fus, now) {
@@ -266,6 +387,10 @@ window.Modules.customer = (function () {
       box.appendChild(histBox);
     }
 
+    // 该客户的「在办事项」：把客户与待办/日程连起来看，避免两边割裂
+    box.appendChild(el('div', 'day-section-title', '关联事项'));
+    box.appendChild(relatedSection(c));
+
     // 阶段停留时长（看卡在哪一段）
     const durs = CU.stageDurations(c, now);
     if (durs.length) {
@@ -312,6 +437,73 @@ window.Modules.customer = (function () {
     return box;
   }
 
+  // ---------- 关联事项：该客户相关的待办与日程 ----------
+  // 客户档案与实际要做的事（待办/时间块）过去在两个页面里各看各的，
+  // 这里把它们聚到一个地方，并给出直达入口。
+  function relatedSection(c) {
+    const wrap = el('div');
+
+    const todos = (Store.get().todos || []).filter(function (t) {
+      return t && !t.deleted && t.customerId === c.id;
+    });
+    const openTodos = todos.filter(function (t) { return t.status !== 'done'; });
+    const doneTodos = todos.filter(function (t) { return t.status === 'done'; });
+
+    // 关联日程：待办「排到日程」后会写入 scheduledEventId
+    const events = Store.get().events || [];
+    const evById = {};
+    events.forEach(function (e) { if (e && !e.deleted) evById[e.id] = e; });
+    const linked = todos
+      .map(function (t) { return { todo: t, ev: t.scheduledEventId ? evById[t.scheduledEventId] : null }; })
+      .filter(function (p) { return !!p.ev; })
+      .sort(function (a, b) { return (a.ev.start || 0) - (b.ev.start || 0); });
+
+    if (!todos.length && !linked.length) {
+      wrap.appendChild(el('div', 'placeholder', '这个客户还没有关联的待办，记录跟进后会自动生成'));
+      return wrap;
+    }
+
+    // 待办
+    if (openTodos.length) {
+      openTodos.forEach(function (t) {
+        const row = el('div', 'item');
+        const main = el('div', 'item-main');
+        const title = el('div', 'item-title', t.title || '（无标题待办）');
+        main.appendChild(title);
+        const meta = [];
+        if (t.deadline != null) meta.push('截止 ' + Utils.toDateTimeStr(t.deadline));
+        if (t.followupTag) meta.push('跟进动作');
+        if (t.scheduledEventId && evById[t.scheduledEventId]) meta.push('已排到日程');
+        if (meta.length) main.appendChild(el('div', 'item-meta', meta.join(' · ')));
+        row.appendChild(main);
+        const side = el('div', 'item-side');
+        const goBtn = el('button', 'btn btn-sm', '去待办');
+        goBtn.addEventListener('click', function () {
+          if (window.App && window.App.switchView) window.App.switchView('todo');
+        });
+        side.appendChild(goBtn);
+        row.appendChild(side);
+        wrap.appendChild(row);
+      });
+    }
+
+    // 已排到日程的时间块
+    if (linked.length) {
+      wrap.appendChild(el('div', 'item-meta', '已排到日程：'));
+      linked.forEach(function (p) {
+        const row = el('div', 'item-meta');
+        row.textContent = '　· ' + Utils.toDateTimeStr(p.ev.start) + ' ' + (p.ev.title || '') +
+          (p.todo.status === 'done' ? '（已完成）' : '');
+        wrap.appendChild(row);
+      });
+    }
+
+    if (doneTodos.length) {
+      wrap.appendChild(el('div', 'item-meta', '已完成 ' + doneTodos.length + ' 条相关待办'));
+    }
+    return wrap;
+  }
+
   // ---------- 阶段变更（赢单强制确认成交金额） ----------
   function onStageChange(c, stage) {
     if (stage === c.stage) return;
@@ -338,6 +530,20 @@ window.Modules.customer = (function () {
     const fContact = field(body, '联系人', c ? c.contact : '', 'text');
     const fPhone = field(body, '联系电话', c ? c.phone : '', 'text');
     const fOwner = field(body, '负责人', c ? c.owner : '', 'text');
+    // 负责人是团队筛选/统计的维度，必须统一写法：给已有负责人做候选，
+    // 避免同一个人被写成「李四 / 李四（销售）/ 李四L」导致统计被拆散
+    const owners = CU.ownerList(Store.get().customers);
+    if (owners.length) {
+      fOwner.setAttribute('list', 'customer-owner-list');
+      const dl = el('datalist');
+      dl.id = 'customer-owner-list';
+      owners.forEach(function (o) {
+        const opt = el('option');
+        opt.value = o;
+        dl.appendChild(opt);
+      });
+      body.appendChild(dl);
+    }
     const fRemark = field(body, '备注', c ? c.remark : '', 'textarea');
 
     window.Modal.open({

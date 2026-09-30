@@ -11,5 +11,6 @@ module.exports = {
   sync: require('./sync.js'),
   model: require('./model.js'),
   inbox: require('./inbox.js'),
+  links: require('./links.js'),
   customer: require('./customer.js'),
 };

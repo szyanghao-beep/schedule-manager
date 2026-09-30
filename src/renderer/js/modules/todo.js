@@ -8,6 +8,7 @@ window.Modules.todo = (function () {
   const el = window.Dom.el;
   const clear = window.Dom.clear;
   const H = window.Helpers;
+  const L = window.LinkUtil;
 
   // 模块局部状态
   let filterCategory = 'all';
@@ -24,6 +25,12 @@ window.Modules.todo = (function () {
     const state = Store.get();
     Object.keys(selected).forEach(function (id) {
       if (!state.todos.some(function (t) { return t.id === id; })) delete selected[id];
+    });
+
+    // 清理悬空关联：关联的日程已被删掉的待办，不应继续显示「已排到日程」
+    // （否则用户点「去日程」会跳到一片空白，这正是「关联不人性化」的来源之一）
+    window.LinkUtil.danglingTodos(state.todos, state.events).forEach(function (t) {
+      Store.updateTodo(t.id, { scheduledEventId: null });
     });
 
     // 头部
@@ -154,6 +161,12 @@ window.Modules.todo = (function () {
     const parts = [];
     if (t.deadline) parts.push('截止 ' + window.Utils.toDateTimeStr(t.deadline));
     if (t.repeat && t.repeat.type !== 'none') parts.push(C.REPEAT_LABEL[t.repeat.type]);
+    // 关联信息：待办排到日程后要能看出来，并一眼看到排在什么时候
+    const ev = L.linkedEvent(t, Store.get().events);
+    if (ev) parts.push('已排到日程 ' + window.Utils.toDateTimeStr(ev.startTime));
+    const src = L.sourceLabel(t);
+    if (src) parts.push('来自' + src);
+    if (t.followupTag) parts.push('客户跟进');
     meta.textContent = parts.join(' · ');
     main.appendChild(meta);
 
@@ -171,10 +184,22 @@ window.Modules.todo = (function () {
     side.appendChild(H.quadrantBadge(t));
     side.appendChild(H.badge('priority', t.priority));
     side.appendChild(H.badge('status', status));
-    const schedBtn = el('button', 'btn btn-sm', '⏱ 排到日程');
-    schedBtn.title = '把该待办按预估耗时排到日程，生成时间块';
+    const schedBtn = el('button', 'btn btn-sm', ev ? '↻ 重新排程' : '⏱ 排到日程');
+    schedBtn.title = ev
+      ? '已排在 ' + window.Utils.toDateTimeStr(ev.startTime) + '，点此改时间'
+      : '把该待办按预估耗时排到日程，生成时间块';
     schedBtn.addEventListener('click', function (e) { e.stopPropagation(); scheduleTodo(t); });
     side.appendChild(schedBtn);
+    if (ev) {
+      const goBtn = el('button', 'btn btn-sm', '去日程');
+      goBtn.title = '跳到日程页查看这个时间块';
+      goBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        window.App.switchView('schedule');
+        window.Modules.schedule.goto(ev.startTime);
+      });
+      side.appendChild(goBtn);
+    }
 
     row.appendChild(check);
     row.appendChild(main);
@@ -184,13 +209,26 @@ window.Modules.todo = (function () {
     row.addEventListener('dblclick', function () { openTodoForm(t); });
     row.addEventListener('contextmenu', function (e) {
       e.preventDefault();
-      window.ContextMenu.show(e.clientX, e.clientY, [
+      const evNow = L.linkedEvent(t, Store.get().events);
+      const menu = [
         { label: t.status === 'done' ? '标记未完成' : '标记完成', onClick: function () { toggle(t); } },
         { label: '编辑', onClick: function () { openTodoForm(t); } },
-        { label: '排到日程', onClick: function () { scheduleTodo(t); } },
-        '-',
-        { label: '删除', danger: true, onClick: function () { Store.deleteTodo(t.id); window.Toast.success('已删除'); } },
-      ]);
+        { label: evNow ? '重新排程' : '排到日程', onClick: function () { scheduleTodo(t); } },
+      ];
+      if (evNow) {
+        menu.push({ label: '去日程查看', onClick: function () {
+          window.App.switchView('schedule');
+          window.Modules.schedule.goto(evNow.startTime);
+        } });
+        menu.push({ label: '解除日程关联', onClick: function () {
+          // 只断开关联，不删日程（日程本身可能是有意义的会议）
+          Store.updateTodo(t.id, { scheduledEventId: null });
+          window.Toast.success('已解除关联，日程仍保留');
+        } });
+      }
+      menu.push('-');
+      menu.push({ label: '删除', danger: true, onClick: function () { Store.deleteTodo(t.id); window.Toast.success('已删除'); } });
+      window.ContextMenu.show(e.clientX, e.clientY, menu);
     });
 
     return row;
@@ -200,6 +238,7 @@ window.Modules.todo = (function () {
   function toggle(t) {
     if (t.status === 'done') {
       Store.updateTodo(t.id, { status: 'pending', completedAt: null });
+      syncLinkedEvent(t, false);
       return;
     }
     if (t.repeat && t.repeat.type !== 'none' && t.deadline) {
@@ -214,6 +253,15 @@ window.Modules.todo = (function () {
       }
     }
     Store.updateTodo(t.id, { status: 'done', completedAt: Date.now() });
+    syncLinkedEvent(t, true);
+  }
+
+  // 待办完成后，排在日程上的那个时间块也标记完成 —— 两边状态不该各说各话。
+  // 只同步状态，不动时间/标题（用户可能已单独调过时间）。
+  function syncLinkedEvent(t, done) {
+    const sync = L.statusSyncPatch(t, Store.get().events, done);
+    if (!sync) return;
+    Store.updateEvent(sync.eventId, sync.patch);
   }
 
   // 新增/编辑弹窗
@@ -392,13 +440,18 @@ window.Modules.todo = (function () {
     return d.getTime();
   }
 
-  // 排到日程：把待办按预估耗时生成一个时间块日程，并记录 scheduledEventId 关联
+  // 排到日程：把待办按预估耗时生成一个时间块日程，并记录 scheduledEventId 关联。
+  // 若已排过，则「重新排程」是更新原来那个时间块，而不是再建一个
+  //（否则反复排程会在日程上堆出一串重复时间块）。
   function scheduleTodo(t, defaultStart) {
     const dur = (t && t.estimatedMinutes) ? t.estimatedMinutes : 60;
-    const startInit = defaultStart || (t && t.deadline) || nextBlockStart();
+    const existing = L.linkedEvent(t, Store.get().events);
+    const startInit = defaultStart || (existing && existing.startTime) || (t && t.deadline) || nextBlockStart();
 
     const body = el('div');
-    const hint = el('div', 'item-meta', '按预估耗时 ' + dur + ' 分钟生成一个时间块日程（不会改动待办本身）。');
+    const hint = el('div', 'item-meta', existing
+      ? '按预估耗时 ' + dur + ' 分钟调整已有时间块（原时间：' + window.Utils.toDateTimeStr(existing.startTime) + '）。'
+      : '按预估耗时 ' + dur + ' 分钟生成一个时间块日程（不会改动待办本身）。');
     hint.style.marginBottom = '12px';
     body.appendChild(hint);
 
@@ -417,12 +470,25 @@ window.Modules.todo = (function () {
     window.Modal.open({
       title: '排到日程 · ' + (t.title || '待办'),
       content: body,
-      okText: '创建时间块',
+      okText: existing ? '更新时间块' : '创建时间块',
       onOk: function () {
         const d = window.Dom.readForm(body);
         const start = window.Utils.parseDateTime(d.blockDate, d.blockTime || '09:00');
         const end = start + dur * 60000;
         const cat = H.categoryOf(t.categoryId);
+
+        if (existing) {
+          // 已排过程：更新原时间块，保持 id 不变（关联不会断，也不会堆重复日程）
+          Store.updateEvent(existing.id, {
+            title: t.title, description: t.description || '',
+            startTime: start, endTime: end,
+            categoryId: t.categoryId, categoryName: cat.name, categoryColor: cat.color,
+            updatedAt: Date.now(),
+          });
+          window.Toast.success('已更新时间块为 ' + window.Utils.toDateTimeStr(start));
+          return;
+        }
+
         const ev = {
           id: window.Utils.genId(), status: 'pending', createdAt: Date.now(), updatedAt: Date.now(),
           title: t.title, description: t.description || '', allDay: false,

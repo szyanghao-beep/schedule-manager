@@ -91,6 +91,12 @@ async function main() {
     out.customerHtmlLen = cEl ? cEl.innerHTML.length : 0;
     out.customerHasTitle = cEl ? cEl.textContent.indexOf('客户商机') >= 0 : false;
     out.customerHasAddBtn = cEl ? cEl.textContent.indexOf('新增客户') >= 0 : false;
+    // 团队共用商机库的关键入口（客户一多就必须能搜、能按人看）
+    out.customerHasSearch = !!(cEl && cEl.querySelector('#customer-search'));
+    out.customerHasOwnerFilter = cEl ? cEl.textContent.indexOf('全部负责人') >= 0 : false;
+    out.customerHasBucketBar = cEl
+      ? (cEl.textContent.indexOf('已逾期') >= 0 && cEl.textContent.indexOf('未安排') >= 0) : false;
+    out.customerHasTeamToggle = cEl ? cEl.textContent.indexOf('团队汇总') >= 0 : false;
     // 5) 其余视图也逐个渲染（确保没有整页崩溃）
     out.viewErrors = {};
     ['schedule','todo','plan','inbox','review','memorials','bookkeeping','search','stats'].forEach(function (v) {
@@ -102,6 +108,142 @@ async function main() {
     } catch (e) {
       out.syncServerStatusError = String(e && e.message || e);
     }
+
+    // 6b) 「修改地址」必须真的能打开编辑器。
+    //     曾经出现过 editBox 创建了但没有 appendChild 到页面上的 bug：
+    //     点「修改地址」切换的是一个游离节点，界面上毫无反应。
+    //     只断言「按钮存在」抓不到这种问题，必须真点一次并检查可见性。
+    window.App.switchView('settings');
+    const realSyncStatus = window.API.syncStatus;
+    window.API.syncStatus = function () {
+      return Promise.resolve({
+        serverUrl: 'http://192.168.0.106:8787', loggedIn: true,
+        lastPulledAt: 0, lastPushedAt: 0,
+      });
+    };
+    window.Modules.settings.render();
+    await new Promise(function (r) { setTimeout(r, 500); });
+    const setEl = document.getElementById('view-settings');
+    function findByText(rootEl, sel, text) {
+      return Array.prototype.filter.call(rootEl.querySelectorAll(sel), function (n) {
+        return n.textContent.trim() === text;
+      })[0];
+    }
+    function visible(node) {
+      if (!node) return false;
+      // offsetParent 为 null 通常意味着 display:none 或未挂载
+      return node.offsetParent !== null || node.getClientRects().length > 0;
+    }
+    out.editAddr = {};
+    out.editAddr.hasEditBtn = !!findByText(setEl, 'button', '修改地址');
+    const saveBtnBefore = findByText(setEl, 'button', '保存地址');
+    // 关键：按钮必须挂在页面上（游离节点 querySelector 找不到）
+    out.editAddr.saveBtnAttached = !!saveBtnBefore;
+    out.editAddr.saveBtnHiddenBefore = !!saveBtnBefore && !visible(saveBtnBefore);
+
+    const editBtnEl = findByText(setEl, 'button', '修改地址');
+    if (editBtnEl) editBtnEl.click();
+    const saveBtnAfter = findByText(setEl, 'button', '保存地址');
+    out.editAddr.saveBtnVisibleAfterClick = visible(saveBtnAfter);
+    // 地址输入框应预填当前服务器地址。
+    // 注意：设置页里 AI / 邮件等卡片也有 text 输入框，不能取全页第一个 input，
+    // 要从「保存地址」按钮往上找到它所在的编辑器容器再取。
+    const editContainer = saveBtnAfter && saveBtnAfter.parentNode ? saveBtnAfter.parentNode.parentNode : null;
+    const ipInputEl = editContainer ? editContainer.querySelector('input') : null;
+    out.editAddr.ipPrefilled = !!ipInputEl && ipInputEl.value === 'http://192.168.0.106:8787';
+    out.editAddr.ipValueFound = ipInputEl ? String(ipInputEl.value) : '(未找到输入框)';
+
+    // 再点一次应收起
+    if (editBtnEl) editBtnEl.click();
+    out.editAddr.saveBtnHiddenAfterSecondClick = !visible(findByText(setEl, 'button', '保存地址'));
+
+    // 还原真实的 syncStatus 桩，避免影响后续检查
+    window.API.syncStatus = realSyncStatus;
+
+    // 7) 「收件箱 → 待办 → 日程」的关联与流转：断言真实行为，而不只是元素存在
+    //    （这些是用户抱怨「关联不人性化」的具体点）
+    const S = window.Store;
+    const LK = window.LinkUtil;
+    out.link = {};
+    function baseTodo(id, title, extra) {
+      return Object.assign({
+        id: id, title: title, description: '', status: 'pending', completedAt: null,
+        createdAt: Date.now(), updatedAt: Date.now(), deadline: null, priority: 'medium',
+        categoryId: '', categoryName: '未分类', categoryColor: '#8a8f98', importance: 'important',
+        repeat: { type: 'none', interval: 1, endDate: null }, reminds: [], remindBefore: 0,
+        remindAt: null, estimatedMinutes: null,
+      }, extra || {});
+    }
+    function buttonsOf(rootEl, text) {
+      return Array.prototype.filter.call(rootEl.querySelectorAll('button'), function (b) {
+        return b.textContent.indexOf(text) >= 0;
+      });
+    }
+
+    // 7a) 收件箱：无截止时间的待办出现；手机收集来的带「手机收集」徽标
+    S.addTodo(baseTodo('smoke-inbox-1', '冒烟-收件箱条目'));
+    S.addTodo(baseTodo('smoke-inbox-mobile', '冒烟-手机收集条目', { source: 'mobile-inbox' }));
+    window.App.switchView('inbox');
+    const iEl = document.getElementById('view-inbox');
+    out.link.inboxShowsItem = iEl.textContent.indexOf('冒烟-收件箱条目') >= 0;
+    out.link.inboxShowsMobileBadge = iEl.textContent.indexOf('手机收集') >= 0;
+    out.link.inboxHasSelectAll = buttonsOf(iEl, '全选').length > 0;
+
+    // 7b) 批量整理：全选后出现批量操作栏
+    const allBtn = buttonsOf(iEl, '全选')[0];
+    if (allBtn) allBtn.click();
+    const iEl2 = document.getElementById('view-inbox');
+    out.link.batchBarHasSetToday = buttonsOf(iEl2, '设为今天').length > 0;
+    out.link.batchBarShowsCount = iEl2.textContent.indexOf('已选') >= 0;
+
+    // 7c) 批量「设为今天」→ 这些条目应带着截止时间离开收件箱
+    const todayBtn = buttonsOf(iEl2, '设为今天')[0];
+    if (todayBtn) todayBtn.click();
+    const leftInInbox = LK.inboxTodos(S.get().todos).filter(function (t) {
+      return t.id.indexOf('smoke-inbox') === 0;
+    });
+    out.link.batchRemovedFromInbox = leftInInbox.length;
+    const movedToday = S.get().todos.filter(function (t) {
+      return t.id.indexOf('smoke-inbox') === 0 && t.deadline != null;
+    }).length;
+    out.link.batchGotDeadline = movedToday;
+
+    // 7d) 待办排到日程后：待办侧能看出「已排到日程」并给出去日程的入口
+    S.addTodo(baseTodo('smoke-link-todo', '冒烟-联动待办', { deadline: Date.now() + 3600000, estimatedMinutes: 30 }));
+    S.addEvent({
+      id: 'smoke-link-event', status: 'pending', createdAt: Date.now(), updatedAt: Date.now(),
+      title: '冒烟-联动待办', description: '', allDay: false,
+      startTime: Date.now() + 3600000, endTime: Date.now() + 5400000, priority: 'medium',
+      categoryId: '', categoryName: '未分类', categoryColor: '#8a8f98',
+      repeat: { type: 'none', interval: 1, endDate: null }, remindBefore: 0, reminds: [],
+    });
+    S.updateTodo('smoke-link-todo', { scheduledEventId: 'smoke-link-event' });
+    window.App.switchView('todo');
+    const tdEl = document.getElementById('view-todo');
+    out.link.todoShowsScheduled = tdEl.textContent.indexOf('已排到日程') >= 0;
+    out.link.todoHasGoScheduleBtn = buttonsOf(tdEl, '去日程').length > 0;
+
+    // 7e) 日程侧反查：日视图里该时间块应带「来自待办」徽标
+    window.App.switchView('schedule');
+    window.Modules.schedule.goto(Date.now() + 3600000);
+    const scEl = document.getElementById('view-schedule');
+    out.link.scheduleShowsFromTodo = scEl.textContent.indexOf('来自待办') >= 0;
+
+    // 7f) 状态联动：完成待办 → 关联日程也跟着完成（两边不该各说各话）
+    out.link.eventStatusBefore = S.get().events.find(function (e) { return e.id === 'smoke-link-event'; }).status;
+    const todoObj = S.get().todos.find(function (t) { return t.id === 'smoke-link-todo'; });
+    window.Modules.todo.toggle(todoObj);
+    out.link.eventStatusAfter = S.get().events.find(function (e) { return e.id === 'smoke-link-event'; }).status;
+
+    // 7g) 悬空关联清理：日程被删后，待办不应再显示「已排到日程」
+    S.deleteEvent('smoke-link-event');
+    window.Modules.todo.render();
+    const afterDel = S.get().todos.find(function (t) { return t.id === 'smoke-link-todo'; });
+    out.link.danglingLinkCleared = !afterDel.scheduledEventId;
+    window.App.switchView('todo');
+    out.link.todoNoLongerShowsScheduled =
+      document.getElementById('view-todo').textContent.indexOf('已排到日程') < 0;
+
     return out;
   })()`);
 
@@ -129,11 +271,24 @@ async function main() {
     String(result.setServerStatusUrl));
   check('空地址被拒绝（不会静默写入空地址）', result.setServerEmptyRejected === true);
 
+  console.log('== 「修改地址」真的能打开编辑器（防「创建了但没挂到页面上」）==');
+  const ea = result.editAddr || {};
+  check('已登录态下有「修改地址」按钮', ea.hasEditBtn === true);
+  check('★ 地址编辑器已挂载到页面（游离节点在此会判失败）', ea.saveBtnAttached === true);
+  check('编辑器默认是收起的', ea.saveBtnHiddenBefore === true);
+  check('★ 点「修改地址」后编辑器可见', ea.saveBtnVisibleAfterClick === true);
+  check('编辑器预填当前服务器地址', ea.ipPrefilled === true, '实际值=' + ea.ipValueFound);
+  check('再点一次收起', ea.saveBtnHiddenAfterSecondClick === true);
+
   console.log('== 客户页渲染（本版本新功能）==');
   check('客户页渲染无异常', result.customerError === null, result.customerError || '');
   check('客户页有内容', result.customerHtmlLen > 200, 'len=' + result.customerHtmlLen);
   check('客户页含标题「客户商机」', result.customerHasTitle === true);
   check('客户页含「新增客户」按钮', result.customerHasAddBtn === true);
+  check('客户页含搜索框（团队共用商机库的刚需）', result.customerHasSearch === true);
+  check('客户页含负责人筛选下拉', result.customerHasOwnerFilter === true);
+  check('客户页含「今天该跟谁」跟进分桶（逾期/今天/本周/未安排）', result.customerHasBucketBar === true);
+  check('客户页含「团队汇总（按负责人）」入口', result.customerHasTeamToggle === true);
 
   console.log('== 其余视图逐个渲染 ==');
   const errs = result.viewErrors || {};
@@ -144,6 +299,23 @@ async function main() {
   check('syncServerStatus 返回状态对象', !!st && typeof st === 'object', result.syncServerStatusError || '');
   check('状态含局域网 IP 与配对码字段', !!st && Array.isArray(st.ips) && typeof st.pairingCode === 'string',
     st ? ('ips=' + JSON.stringify(st.ips) + ' code=' + st.pairingCode) : '无');
+
+  console.log('== 收件箱 → 待办 → 日程：关联与流转（用户痛点）==');
+  const lk = result.link || {};
+  check('收件箱渲染出未整理条目', lk.inboxShowsItem === true);
+  check('手机收集来的条目带「手机收集」徽标', lk.inboxShowsMobileBadge === true);
+  check('收件箱有全选入口', lk.inboxHasSelectAll === true);
+  check('全选后出现批量操作栏', lk.batchBarShowsCount === true && lk.batchBarHasSetToday === true);
+  check('批量「设为今天」后条目带上截止时间', lk.batchGotDeadline >= 2, 'got=' + lk.batchGotDeadline);
+  check('★ 批量整理后条目离开收件箱', lk.batchRemovedFromInbox === 0, 'left=' + lk.batchRemovedFromInbox);
+  check('待办侧显示「已排到日程」', lk.todoShowsScheduled === true);
+  check('待办侧给出去日程的入口', lk.todoHasGoScheduleBtn === true);
+  check('日程侧显示「来自待办」', lk.scheduleShowsFromTodo === true);
+  check('★ 完成待办后关联日程同步为已完成',
+    lk.eventStatusBefore === 'pending' && lk.eventStatusAfter === 'done',
+    lk.eventStatusBefore + ' -> ' + lk.eventStatusAfter);
+  check('★ 日程被删后待办的悬空关联被清理', lk.danglingLinkCleared === true);
+  check('悬空清理后待办不再显示「已排到日程」', lk.todoNoLongerShowsScheduled === true);
 
   console.log('== 渲染层控制台错误 ==');
   check('无渲染层错误日志', rendererErrors.length === 0, rendererErrors.slice(0, 3).join(' | '));

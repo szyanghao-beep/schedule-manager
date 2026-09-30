@@ -255,6 +255,115 @@ function toggleTodoDone(id) {
   });
 }
 
+// ---------------- 客户商机 ----------------
+// 与桌面端 store 的客户语义保持一致：
+//   - 金额是「流水」（预估可反复调整 / 落单一次性确认 / 赢单后追加增购），当前值由流水派生
+//   - 阶段变更留痕（stageHistory），走 shared 的 changeStage
+//   - 记录跟进时「下次跟进时间」会生成一条普通待办（deadline = 下次跟进时间），
+//     于是手机上记的跟进，回到桌面端就自动出现在待办/规划/提醒里
+const CU = shared.customer;
+
+function createCustomer(input) {
+  const now = Date.now();
+  return _create(sync.ENTITY_TYPES.CUSTOMER, Object.assign({
+    stage: 'lead', contact: '', phone: '', owner: '', remark: '',
+    amountHistory: [],
+    stageHistory: [{ stage: 'lead', at: now }],
+  }, input));
+}
+
+function updateCustomer(id, patch) {
+  const old = getById(sync.ENTITY_TYPES.CUSTOMER, id);
+  if (!old) return null;
+  if (patch && patch.stage && patch.stage !== old.stage) {
+    // 阶段变更必须留痕，否则「每段停留多久」就看不出来了
+    const changed = CU.changeStage(old, patch.stage, Date.now());
+    const rest = Object.assign({}, patch);
+    delete rest.stage;
+    return _update(sync.ENTITY_TYPES.CUSTOMER, id, Object.assign(changed, rest));
+  }
+  return _update(sync.ENTITY_TYPES.CUSTOMER, id, patch);
+}
+
+function deleteCustomer(id) {
+  const c = getById(sync.ENTITY_TYPES.CUSTOMER, id);
+  if (!c) return;
+  _remove(sync.ENTITY_TYPES.CUSTOMER, id);
+  // 级联软删该客户的跟进记录与未完成的跟进待办（与桌面端一致）
+  getRecords(sync.ENTITY_TYPES.FOLLOWUP).forEach(function (f) {
+    if (f.customerId === id) _remove(sync.ENTITY_TYPES.FOLLOWUP, f.id);
+  });
+  getRecords(sync.ENTITY_TYPES.TODO).forEach(function (t) {
+    if (t.customerId === id && t.followupTag && t.status !== 'done') {
+      _remove(sync.ENTITY_TYPES.TODO, t.id);
+    }
+  });
+}
+
+// 金额：预估可多次、落单仅一次、增购需已赢单（统一由 shared.customer.addAmount 裁决）
+function addCustomerAmount(id, entry) {
+  const c = getById(sync.ENTITY_TYPES.CUSTOMER, id);
+  if (!c) return null;
+  if (entry && entry.kind === 'upsell' && !CU.canUpsell(c)) return null; // 未赢单不能增购
+  const updated = CU.addAmount(c, entry || {});
+  if (updated === c) return null; // 被拒绝（非法值 / 重复落单）
+  const patch = Object.assign({}, updated);
+  delete patch.id;
+  return _update(sync.ENTITY_TYPES.CUSTOMER, id, patch);
+}
+
+function getFollowups(customerId) {
+  const list = getRecords(sync.ENTITY_TYPES.FOLLOWUP);
+  if (!customerId) return list;
+  return list.filter(function (f) { return f.customerId === customerId; });
+}
+
+// 记录跟进：写入跟进记录，并按「下次跟进时间」生成/更新一条跟进待办
+function recordFollowup(customerId, data) {
+  const c = getById(sync.ENTITY_TYPES.CUSTOMER, customerId);
+  if (!c) return null;
+  const now = Date.now();
+  const d = data || {};
+
+  const fu = _create(sync.ENTITY_TYPES.FOLLOWUP, {
+    customerId: customerId,
+    at: d.at != null ? d.at : now,
+    method: d.method || 'phone',
+    content: d.content ? String(d.content).slice(0, 2000) : '',
+    nextAt: d.nextAt != null ? d.nextAt : null,
+    nextPlan: d.nextPlan ? String(d.nextPlan).slice(0, 500) : '',
+  });
+
+  let todo = null;
+  if (fu.nextAt != null) {
+    // 同一客户只保留一条未完成的跟进待办，重复记录跟进是「更新」而不是堆积
+    const existing = getRecords(sync.ENTITY_TYPES.TODO).find(function (t) {
+      return t.customerId === customerId && t.followupTag && t.status !== 'done';
+    });
+    const built = CU.buildFollowupTodo(c, fu, { now: now });
+    if (existing) {
+      const patch = Object.assign({}, built);
+      delete patch.id;
+      todo = _update(sync.ENTITY_TYPES.TODO, existing.id, patch);
+    } else {
+      const created = Object.assign({}, built);
+      delete created.id; // _create 会生成 id
+      todo = _create(sync.ENTITY_TYPES.TODO, created);
+    }
+    if (todo) _update(sync.ENTITY_TYPES.FOLLOWUP, fu.id, { todoId: todo.id });
+  }
+
+  return { followup: fu, todo: todo };
+}
+
+function updateFollowup(id, patch) {
+  return _update(sync.ENTITY_TYPES.FOLLOWUP, id, patch);
+}
+
+function deleteFollowup(id) {
+  _remove(sync.ENTITY_TYPES.FOLLOWUP, id);
+}
+
 // ---------------- 同步 ----------------
 // 拉取结果合并：mergeChanges(LWW) + 推进 lastSyncAt + 清理已被服务端确认的 journal 条目。
 // 若某条本地变更服务端还没有（或时间更旧），保留在 journal 里等待下次重推。
@@ -386,6 +495,15 @@ export default {
   updateTodo,
   deleteTodo,
   toggleTodoDone,
+  // 客户商机
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  addCustomerAmount,
+  getFollowups,
+  recordFollowup,
+  updateFollowup,
+  deleteFollowup,
   applyPull,
   pruneJournalAfterPush,
   // 收集箱
