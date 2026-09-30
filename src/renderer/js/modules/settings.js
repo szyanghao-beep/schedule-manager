@@ -413,7 +413,8 @@ window.Modules.settings = (function () {
       cancelIpBtn.addEventListener('click', function () { editBox.style.display = 'none'; });
       editBtns.appendChild(saveIpBtn);
       editBtns.appendChild(cancelIpBtn);
-      editBox.appendChild(editBtns); // MUTATION-TEST: 故意不把 editBox 挂到 box 上
+      editBox.appendChild(editBtns);
+      box.appendChild(editBox); // 修复：editBox 之前只创建未挂载，「修改地址」点了没有任何反应
 
       const btnRow = el('div', 'toolbar');
       btnRow.style.marginTop = '8px';

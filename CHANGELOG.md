@@ -15,6 +15,22 @@
 
 ---
 
+## 测试基线（v2.3.4）
+
+| 层 | 命令 | 结果 |
+|----|------|------|
+| 纯函数单测 + 跨文件契约 | `npm test` | **323 通过 / 0 失败**（v2.3.3 为 248） |
+| 渲染层 UI（jsdom） | `npm run test:ui` | **48 通过 / 0 失败**（新增） |
+| 真实 Electron 冒烟 | `npm run smoke` | **45 通过 / 0 失败**（v2.3.3 为 17） |
+| 打包内容验收 | `npm run verify:asar` | **66 通过 / 0 失败**（v2.3.3 为 35） |
+| 打包产物启动验收 | `npm run verify:packaged` | **5 通过 / 0 失败**（新增） |
+| 后端服务 / 端到端 / 收件箱直传 | `server/verify-*.js` | **17 / 6 / 16 全通过** |
+| 一条命令跑完上述五层 | `npm run verify:all` | 新增 |
+
+产物：`dist\日程管理 Setup 2.3.4.exe`（95.8 MB，Windows NSIS）
+
+---
+
 ## 版本历史
 
 ### v2.3.4 — 按实机反馈补强：同步地址可改、客户管理、收件箱/待办/日程关联、手机端客户跟进
@@ -82,11 +98,47 @@
 
 #### ⑤ 渲染层 UI 自动化测试（jsdom）
 
-此前 248 个用例全是纯函数测试，渲染层是盲区——「单测全绿但界面坏」曾真实发生过
+此前全部用例都是纯函数测试，渲染层是盲区——「单测全绿但界面坏」曾真实发生过
 （v2.3.3 的漏透传 bug 就是整页渲染中断，而单测全绿）。
-本轮引入 jsdom 在真实 DOM 上渲染界面模块并断言输出与交互。
+本轮引入 jsdom 在真实 DOM 上渲染界面模块，断言真实输出与交互：
 
-**测试**：见下方「测试基线」小节。
+- `test/ui.helpers.js`：宿主。按 `src/renderer/index.html` 里 `<script src>` 的
+  **真实顺序**加载渲染层脚本（清单从 index.html 推导，不会与源码漂移），
+  把 `window.API` 整层打桩成不依赖 Electron 的假实现，并冻结时钟
+  （否则「今天/本周」这类断言不可能稳定）。
+- `test/ui.harness.test.js`：钉住宿主自身的硬约束——脚本清单与 index.html 一致、
+  每个 `js/modules/*.js` 都挂上了 `render()`、视图容器与导航项一一对应、
+  `window.API` 的每个方法都落在桩上（这条正是漏透传那类 bug 的防线）。
+- `test/ui.settings.test.js` / `ui.todo.test.js` / `ui.customer.test.js` / `ui.stats.test.js`：
+  按视图断言渲染结果与交互（筛选、勾选、切换、统计数字与 `shared/utils.js`
+  的计算结果是否一致）。
+
+**⑤ 的附带收获（真实 bug）**：设置页「修改地址」点了没有任何反应。
+根因是 `editBox` 被创建但从未 `appendChild` 到页面上，点击只是切换一个
+**游离节点**的 `display`。此前只断言「按钮存在」，抓不到这类问题。
+现已补上挂载，并新增端到端断言（真点一次，校验已挂载 / 点击后可见 /
+预填当前地址 / 再点收起），并**反向验证过**：移除那一行会让 4 项断言变红。
+
+#### ⑥ 打包验收补一道「真的能启动」
+
+本轮踩到一次严重事故：**打包与源码改写并发**，导致 `app.asar` 里的
+`shared/utils.js` 被截断。后果是 `verify:asar`（原本 35 项）**全绿**——
+因为它只查「文件在不在、含不含某些关键字」——但装上去主进程启动即
+`SyntaxError: Unexpected end of input`，用户看到的是错误框。
+
+于是补两层：
+
+1. `verify:asar` 增加**语法有效性**检查：把包内关键 JS 交给 V8 解析
+   （`new vm.Script`）。「文件在包里」不等于「内容是好的」，这次 21 个文件里
+   就有 1 个是坏的，只有真解析才能发现。
+2. 新增 `scripts/verify-packaged.js`（`npm run verify:packaged`）：
+   **直接启动打包产物**（隔离 userData），读主进程 stderr 判定有无加载异常，
+   并预置启用内嵌同步服务后请求 `/health`——能通就说明 `main.js`、`shared/*`、
+   `server/src/*` 全部正常加载起来了。
+   已用那个已知崩溃的包反向验证过：它会精确打印出
+   `app.asar\shared\utils.js ... SyntaxError: Unexpected end of input` 并判失败。
+
+另增 `npm run verify:all` 一条命令跑完五层验收。
 
 ### v2.3.3（2026-09-19）— 修复「安装后设置页缺少本机同步服务」
 

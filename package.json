@@ -12,6 +12,8 @@
     "test:ui": "node --test test/ui.*.test.js",
     "smoke": "electron scripts/electron-smoke.js",
     "verify:asar": "node scripts/verify-asar.js",
+    "verify:packaged": "node scripts/verify-packaged.js",
+    "verify:all": "npm test && npm run test:ui && npm run smoke && npm run verify:asar && npm run verify:packaged",
     "dist": "electron-builder --publish never",
     "dist:dir": "electron-builder --dir",
     "dist:mac": "electron-builder --mac --publish never"

@@ -136,6 +136,11 @@ window.Modules.customer = (function () {
 
     // 负责人筛选（团队场景：只看自己负责的客户）
     const owners = CU.ownerList(all);
+    // 防「筛选中的负责人已不存在」：select.value 会落回空值，
+    // 而空值在这套 UI 里代表「只看未分配」，会静默变成完全不同的筛选结果
+    if (filterOwner !== 'all' && filterOwner !== '' && owners.indexOf(filterOwner) < 0) {
+      filterOwner = 'all';
+    }
     let ownerOptions = [['all', '全部负责人']];
     if (owners.length) ownerOptions = ownerOptions.concat(owners.map(function (o) { return [o, o]; }));
     ownerOptions.push(['', '未分配']);

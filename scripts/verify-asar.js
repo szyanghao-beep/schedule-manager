@@ -53,6 +53,12 @@ const preloadSrc = readFile('preload.js');
 check('preload.js 暴露 syncServerStatus', !!preloadSrc && preloadSrc.indexOf('syncServerStatus') >= 0);
 const settingsSrc = readFile('src/renderer/js/modules/settings.js');
 check('settings.js 渲染「本机同步服务」卡片', !!settingsSrc && settingsSrc.indexOf('本机同步服务') >= 0);
+// 曾出现 editBox 创建了但没 appendChild 的 bug：点「修改地址」切换的是游离节点、界面毫无反应。
+// 这里钉住「编辑器确实被挂到页面上」，防止该修复只留在源码里没进包。
+check('settings.js 把地址编辑器挂到页面上（防游离节点）',
+  !!settingsSrc && settingsSrc.indexOf('box.appendChild(editBox)') >= 0);
+check('settings.js 含「填入本机地址」一键按钮',
+  !!settingsSrc && settingsSrc.indexOf('填入本机地址') >= 0);
 
 console.log('');
 console.log('== 关键运行时文件 ==');
@@ -82,6 +88,32 @@ if (htmlSrc) {
     check('index.html 引用 ' + s, htmlSrc.indexOf(s) >= 0);
   });
 }
+
+// 关键 JS 必须语法有效（能被 V8 解析）。
+// 教训：曾出现「文件在包里、大小也对，但内容被截断/改坏」，
+// 只查存在性会全绿，而装上去主进程直接 SyntaxError 崩在启动。
+console.log('');
+console.log('== 包内关键 JS 语法有效性（防「文件在但内容坏了」）==');
+const vm = require('vm');
+[
+  'main.js', 'preload.js',
+  'shared/utils.js', 'shared/constants.js', 'shared/sync.js', 'shared/inbox.js',
+  'shared/customer.js', 'shared/links.js', 'shared/migrate.js', 'shared/nlp.js',
+  'server/src/app.js', 'server/src/db.js', 'server/src/inboxDrop.js',
+  'src/renderer/js/api.js', 'src/renderer/js/store.js', 'src/renderer/js/app.js',
+  'src/renderer/js/modules/customer.js', 'src/renderer/js/modules/inbox.js',
+  'src/renderer/js/modules/todo.js', 'src/renderer/js/modules/schedule.js',
+  'src/renderer/js/modules/settings.js',
+].forEach(function (f) {
+  const src = readFile(f);
+  if (src == null) { check('语法有效 ' + f, false, '读不到文件'); return; }
+  try {
+    new vm.Script(src, { filename: f });
+    check('语法有效 ' + f, true);
+  } catch (e) {
+    check('语法有效 ' + f, false, String(e && e.message || e));
+  }
+});
 
 console.log('');
 console.log('== 生产依赖（内嵌服务器 / 农历 / 邮件）==');

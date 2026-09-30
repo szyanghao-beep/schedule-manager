@@ -350,7 +350,11 @@ function recordFollowup(customerId, data) {
       delete created.id; // _create 会生成 id
       todo = _create(sync.ENTITY_TYPES.TODO, created);
     }
-    if (todo) _update(sync.ENTITY_TYPES.FOLLOWUP, fu.id, { todoId: todo.id });
+    if (todo) {
+      // 回写 todoId，使跟进记录与自动生成的待办互相可查（与桌面端一致）
+      const withTodo = _update(sync.ENTITY_TYPES.FOLLOWUP, fu.id, { todoId: todo.id });
+      if (withTodo) Object.assign(fu, withTodo);
+    }
   }
 
   return { followup: fu, todo: todo };
