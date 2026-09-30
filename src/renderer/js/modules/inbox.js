@@ -80,11 +80,12 @@ window.Modules.inbox = (function () {
     bar.appendChild(el('span', 'item-meta', '已选 ' + ids.length + ' 条：'));
 
     function setDeadlineAt(ts, label) {
+      // 先清选中再写库：Store 变更为同步触发重绘，顺序反了会残留一帧「已选 N 条」
+      selected = {};
       ids.forEach(function (id) {
         // 给了截止时间就自动离开收件箱 —— 这正是「整理」的本质动作
         Store.updateTodo(id, { deadline: ts });
       });
-      selected = {};
       window.Toast.success('已把 ' + ids.length + ' 条设为' + label);
     }
 
@@ -101,15 +102,15 @@ window.Modules.inbox = (function () {
     });
     const doneBtn = el('button', 'btn btn-sm', '标为已完成');
     doneBtn.addEventListener('click', function () {
-      Store.updateTodos(ids, { status: 'done', completedAt: Date.now() });
       selected = {};
+      Store.updateTodos(ids, { status: 'done', completedAt: Date.now() });
       window.Toast.success('已标记 ' + ids.length + ' 条完成');
     });
     const delBtn = el('button', 'btn btn-sm btn-danger', '删除');
     delBtn.addEventListener('click', function () {
       if (!confirm('确定删除选中的 ' + ids.length + ' 条？')) return;
-      Store.deleteTodos(ids);
       selected = {};
+      Store.deleteTodos(ids);
       window.Toast.success('已删除');
     });
 

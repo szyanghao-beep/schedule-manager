@@ -205,11 +205,10 @@ test('待办页 · 批量选择：出现批量操作条，点「标记完成」�
   assert.strictEqual(h.Store.get().todos.find(function (x) { return x.id === 't1'; }).status, 'done');
   assert.strictEqual(h.Store.get().todos.find(function (x) { return x.id === 't2'; }).status, 'pending');
 
-  // 选中集已被清空。注意：实现里 `selected = {}` 发生在 Store 变更「之后」，
-  // 而 Store 变更会立刻触发一次重绘，所以那一帧的批量条仍是旧的；
-  // 这里显式再渲染一次，验证状态本身确实清干净了（该陈旧一帧的现象见测试报告）。
-  h.Modules.todo.render();
-  assert.strictEqual(metas().indexOf('已选 1 项'), -1, '选中集应为空，批量条不该再出现');
+  // 选中集应已被清空，批量条立刻消失 —— 不能再渲染一次才断言。
+  // 顺序错了（先写库、后清 selected）时，Store 变更触发的重绘会渲染出旧的
+  // 选中集，批量条残留一帧「已选 1 项」；不额外渲染才抓得到这个顺序问题。
+  assert.strictEqual(metas().indexOf('已选 1 项'), -1, '点批量操作后批量条应立即消失（选中集要先清空再写库）');
 });
 
 test('待办页 · 循环待办完成后自动顺延到下一次而不是标记完成', async function (t) {

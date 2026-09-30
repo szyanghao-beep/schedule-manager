@@ -123,13 +123,16 @@ window.Modules.todo = (function () {
     bar.appendChild(el('span', 'item-meta', '已选 ' + ids.length + ' 项'));
 
     const doneBtn = el('button', 'btn btn-sm', '标记完成');
-    doneBtn.addEventListener('click', function () { Store.updateTodos(ids, { status: 'done', completedAt: Date.now() }); selected = {}; });
+    // 注意顺序：Store 变更会同步触发重绘，必须先清空 selected 再写库，
+    // 否则重绘发生在清空之前，批量条会残留一帧「已选 N 项」
+    doneBtn.addEventListener('click', function () { selected = {}; Store.updateTodos(ids, { status: 'done', completedAt: Date.now() }); });
     const undoBtn = el('button', 'btn btn-sm', '标记未完成');
-    undoBtn.addEventListener('click', function () { Store.updateTodos(ids, { status: 'pending', completedAt: null }); selected = {}; });
+    undoBtn.addEventListener('click', function () { selected = {}; Store.updateTodos(ids, { status: 'pending', completedAt: null }); });
     const delBtn = el('button', 'btn btn-sm btn-danger', '批量删除');
     delBtn.addEventListener('click', function () {
       if (!confirm('确定删除选中的 ' + ids.length + ' 项待办？')) return;
-      Store.deleteTodos(ids); selected = {};
+      selected = {};
+      Store.deleteTodos(ids);
       window.Toast.success('已删除');
     });
 

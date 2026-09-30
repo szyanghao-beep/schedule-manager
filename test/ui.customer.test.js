@@ -217,14 +217,15 @@ test('客户页 · 展开详情：金额四行、金额流水、阶段停留、�
   const related = h.texts('.item-title', opened);
   assert.deepStrictEqual(related, ['甲方公司', '跟进：甲方公司（发现商机）', '📞 电话 · 2026-03-08 14:30']);
   assert.ok(h.texts('.item-meta', opened).indexOf('截止 2026-03-12 14:30 · 跟进动作 · 已排到日程') >= 0, JSON.stringify(h.texts('.item-meta', opened)));
-  // ⚠️ 已知缺陷（本次未修，属于他人正在改动的「关联事项」新功能）：
-  //    relatedSection 读的是 ev.start，而日程模型的字段是 startTime，
-  //    所以这条「已排到日程」行的时间目前渲染成 "NaN-NaN-NaN NaN:NaN"。
-  //    这里只断言与时间无关的部分；该缺陷修好后应改成断言整行
-  //    '　· 2026-03-12 14:30 跟进：甲方公司（发现商机）'。
+  // 「已排到日程」那一行断言整行（含时间）。
+  // 曾经 relatedSection 读的是 ev.start 而日程模型字段是 startTime，渲染成
+  // 「· NaN-NaN-NaN NaN:NaN …」——只断言与时间无关的部分是抓不到这类字段写错的。
   const linkedLines = h.texts('.item-meta', opened).filter(function (s) { return s.indexOf('· ') === 0; });
-  assert.strictEqual(linkedLines.length, 1, '应列出已排到日程的时间块：' + JSON.stringify(h.texts('.item-meta', opened)));
-  assert.ok(linkedLines[0].indexOf('跟进：甲方公司（发现商机）') > 0, linkedLines[0]);
+  assert.deepStrictEqual(
+    linkedLines,
+    ['· 2026-03-12 14:30 跟进：甲方公司（发现商机）'],
+    '已排到日程行应带正确时间（出现 NaN 说明读错了日程字段）'
+  );
   assert.deepStrictEqual(h.texts('button', opened).filter(function (s) { return s === '去待办'; }), ['去待办']);
 
   // 跟进时间线

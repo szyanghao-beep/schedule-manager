@@ -461,7 +461,8 @@ window.Modules.customer = (function () {
     const linked = todos
       .map(function (t) { return { todo: t, ev: t.scheduledEventId ? evById[t.scheduledEventId] : null }; })
       .filter(function (p) { return !!p.ev; })
-      .sort(function (a, b) { return (a.ev.start || 0) - (b.ev.start || 0); });
+      // 日程的起始字段是 startTime（不是 start）——写错会渲染成 NaN-NaN-NaN
+      .sort(function (a, b) { return (a.ev.startTime || 0) - (b.ev.startTime || 0); });
 
     if (!todos.length && !linked.length) {
       wrap.appendChild(el('div', 'placeholder', '这个客户还没有关联的待办，记录跟进后会自动生成'));
@@ -497,7 +498,7 @@ window.Modules.customer = (function () {
       wrap.appendChild(el('div', 'item-meta', '已排到日程：'));
       linked.forEach(function (p) {
         const row = el('div', 'item-meta');
-        row.textContent = '　· ' + Utils.toDateTimeStr(p.ev.start) + ' ' + (p.ev.title || '') +
+        row.textContent = '　· ' + Utils.toDateTimeStr(p.ev.startTime) + ' ' + (p.ev.title || '') +
           (p.todo.status === 'done' ? '（已完成）' : '');
         wrap.appendChild(row);
       });
