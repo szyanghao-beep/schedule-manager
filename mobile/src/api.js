@@ -12,26 +12,26 @@
  * 注意：真机填电脑局域网 IP（同一 Wi-Fi）；安卓模拟器访问宿主机用 http://10.0.2.2:8787。
  */
 
-// 默认服务器地址（请改成你的电脑局域网 IP，或在登录页直接填写）
-const DEFAULT_SERVER_URL = 'http://192.168.1.100:8787';
+const shared = require('./shared');
+
+// 默认服务器地址：留空，强制用户在登录页填写真实地址。
+// 原先预置 'http://192.168.1.100:8787' 这类示例 IP 会误导用户照抄，
+// 曾出现填成 192.168.1.6 而真实网段是 192.168.0.x 导致连不上。
+const DEFAULT_SERVER_URL = '';
 
 const REQUEST_TIMEOUT_MS = 15000;
 
-// 规范化服务器地址：去末尾斜杠 + 自动补 http:// 前缀（用户常只填 IP:端口）
-function normalizeBaseUrl(url) {
-  let u = String(url == null ? '' : url).trim();
-  if (!u) u = DEFAULT_SERVER_URL;
-  u = u.replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
-  return u;
-}
+// 服务器地址归一化复用 shared/utils.js，保证与桌面端容错完全一致
+const normalizeBaseUrl = shared.utils.normalizeServerUrl;
 
 // 通用请求：JSON 收发 + 超时（AbortController）
 async function request(baseUrl, path, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+  const base = normalizeBaseUrl(baseUrl);
+  if (!base) throw new Error('请先填写电脑端地址，如 http://192.168.0.106:8787');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(normalizeBaseUrl(baseUrl) + path, {
+    const res = await fetch(base + path, {
       ...options,
       signal: controller.signal,
       headers: {

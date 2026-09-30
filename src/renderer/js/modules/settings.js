@@ -383,11 +383,47 @@ window.Modules.settings = (function () {
   function renderSyncContent(box, st) {
     window.Dom.clear(box);
     if (st && st.loggedIn) {
-      box.appendChild(el('div', 'item-meta', '已登录服务器：' + st.serverUrl));
+      const infoRow = el('div', 'item-meta');
+      infoRow.textContent = '已登录服务器：' + st.serverUrl;
+      box.appendChild(infoRow);
+
+      // 「修改地址」：保留登录态，无需退出重登（换网络/服务端 IP 变更时的常用操作）
+      const editBox = el('div');
+      editBox.style.display = 'none';
+      editBox.style.marginTop = '8px';
+      const ipRow = el('div', 'form-row');
+      ipRow.appendChild(el('label', null, '服务器地址'));
+      const ipInput = el('input');
+      ipInput.type = 'text';
+      ipInput.value = st.serverUrl || '';
+      ipInput.placeholder = 'http://192.168.0.106:8787（可省略 http://）';
+      ipRow.appendChild(ipInput);
+      editBox.appendChild(ipRow);
+      const editBtns = el('div', 'toolbar');
+      const saveIpBtn = el('button', 'btn btn-primary btn-sm', '保存地址');
+      saveIpBtn.addEventListener('click', function () {
+        window.API.syncSetServer(ipInput.value).then(function (res) {
+          window.Toast.success(res && res.changed ? '地址已更新，下次同步将全量对齐' : '地址未变化');
+          window.Modules.settings.render();
+        }).catch(function (e) {
+          window.Toast.error('保存失败：' + (e.message || e));
+        });
+      });
+      const cancelIpBtn = el('button', 'btn btn-sm', '取消');
+      cancelIpBtn.addEventListener('click', function () { editBox.style.display = 'none'; });
+      editBtns.appendChild(saveIpBtn);
+      editBtns.appendChild(cancelIpBtn);
+      editBox.appendChild(editBtns);
+
       const btnRow = el('div', 'toolbar');
       btnRow.style.marginTop = '8px';
       const syncBtn = el('button', 'btn btn-primary btn-sm', '立即同步');
       syncBtn.addEventListener('click', doSync);
+      const editBtn = el('button', 'btn btn-sm', '修改地址');
+      editBtn.addEventListener('click', function () {
+        editBox.style.display = (editBox.style.display === 'none') ? '' : 'none';
+        if (editBox.style.display !== 'none') ipInput.focus();
+      });
       const logoutBtn = el('button', 'btn btn-sm', '退出登录');
       logoutBtn.addEventListener('click', function () {
         window.API.syncLogout().then(function () {
@@ -396,15 +432,47 @@ window.Modules.settings = (function () {
         });
       });
       btnRow.appendChild(syncBtn);
+      btnRow.appendChild(editBtn);
       btnRow.appendChild(logoutBtn);
       box.appendChild(btnRow);
     } else {
-      const server = syncField('服务器地址', 'http://192.168.1.100:8787');
+      // 预填上次用过的地址（退出登录不再清空 serverUrl），避免用户反复手输 IP
+      const server = syncField('服务器地址', 'http://192.168.0.106:8787（可省略 http://）');
+      if (st && st.serverUrl) server.input.value = st.serverUrl;
       const user = syncField('用户名', '');
       const pass = syncField('密码', '', 'password');
       box.appendChild(server.row);
       box.appendChild(user.row);
       box.appendChild(pass.row);
+
+      // 一键填入本机局域网地址：手机/队友要连的就是这台电脑时最常用，
+      // 免去用户自己查 IP（曾出现手输成 192.168.1.x 与真实网段不符导致同步失败）
+      const fillLine = el('div', 'toolbar');
+      fillLine.style.marginTop = '6px';
+      const fillBtn = el('button', 'btn btn-sm', '填入本机地址');
+      const fillHint = el('span', 'item-meta', '');
+      fillHint.style.marginLeft = '8px';
+      fillBtn.addEventListener('click', function () {
+        window.API.syncServerStatus().then(function (s) {
+          const ips = (s && s.ips) || [];
+          if (!ips.length) {
+            window.Toast.error('未检测到局域网 IP，请确认已连 WiFi 或网线，并先启用下方「本机同步服务」');
+            return;
+          }
+          server.input.value = 'http://' + ips[0] + ':' + (s.port || 8787);
+          window.Toast.success('已填入本机地址 ' + ips[0]);
+        }).catch(function () { window.Toast.error('无法读取本机地址'); });
+      });
+      fillLine.appendChild(fillBtn);
+      fillLine.appendChild(fillHint);
+      box.appendChild(fillLine);
+      // 顺带提示本机是否已开同步服务，否则填了也连不上
+      window.API.syncServerStatus().then(function (s) {
+        fillHint.textContent = (s && s.running)
+          ? '本机同步服务运行中'
+          : '提示：本机同步服务未启用，需先到下方「本机同步服务」开启';
+      }).catch(function () {});
+
       const btnRow = el('div', 'toolbar');
       const loginBtn = el('button', 'btn btn-primary btn-sm', '登录');
       const regBtn = el('button', 'btn btn-sm', '注册并登录');

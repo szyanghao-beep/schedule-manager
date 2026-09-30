@@ -6,20 +6,20 @@
  * 凭配对码校验，直接进入电脑「收件箱」等待整理。不走账号登录体系。
  */
 
+const shared = require('./shared');
+
 const REQUEST_TIMEOUT_MS = 15000;
 const PING_TIMEOUT_MS = 5000;
 
 function normalizeUrl(url) {
-  let u = String(url == null ? '' : url).trim().replace(/\/+$/, '');
-  if (!u) return '';
-  // 用户常只填「IP:端口」，自动补 http:// （内嵌同步服务是 http），避免 fetch 拿到无效 URL
-  if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
-  return u;
+  // 复用 shared 单一实现：去空白、去尾斜杠、缺协议自动补 http://
+  // （内嵌同步服务是 http），避免与桌面端容错不一致、fetch 拿到无效 URL
+  return shared.utils.normalizeServerUrl(url);
 }
 
 /**
  * 投递条目到电脑。
- * @param {string} serverUrl   电脑端地址，如 http://192.168.1.5:8787
+ * @param {string} serverUrl   电脑端地址，如 http://192.168.0.106:8787（可省略 http://）
  * @param {string} pairingCode 电脑端设置页显示的 6 位收集口令
  * @param {Array}  items       [{ id, title, createdAt }]
  * @returns {Promise<{accepted:number, duplicated:number, total:number|null}>}

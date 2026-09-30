@@ -114,7 +114,8 @@ function isLoaded() {
 // 登录/注册成功：切换账号，清空本地数据，等待首次全量拉取（since=0）
 function setSession({ token, serverUrl, user }) {
   state.token = token || null;
-  state.serverUrl = serverUrl || '';
+  // 归一化后保存（去空白/尾斜杠、自动补 http://），后续同步与收集直传共用同一地址
+  state.serverUrl = shared.utils.normalizeServerUrl(serverUrl) || '';
   state.user = user || null;
   state.lastSyncAt = 0;
   state.journal = [];
@@ -125,7 +126,7 @@ function setSession({ token, serverUrl, user }) {
 function clearSession() {
   state.token = null;
   state.user = null;
-  state.serverUrl = '';
+  // 保留 serverUrl：退出登录后再登录时表单可预填，无需重新手输电脑 IP
   state.lastSyncAt = 0;
   state.journal = [];
   state.map = new Map();

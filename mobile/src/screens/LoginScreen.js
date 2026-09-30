@@ -22,7 +22,8 @@ import store from '../store';
 import syncClient from '../syncClient';
 
 export default function LoginScreen({ navigation }) {
-  const [serverUrl, setServerUrl] = useState(api.DEFAULT_SERVER_URL);
+  // 预填上次用过的地址（退出登录不再清空），避免每次手输电脑 IP
+  const [serverUrl, setServerUrl] = useState(store.getServerUrl() || api.DEFAULT_SERVER_URL);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [mode, setMode] = useState('login'); // 'login' | 'register'
@@ -32,6 +33,10 @@ export default function LoginScreen({ navigation }) {
   async function submit() {
     if (busy) return;
     const u = username.trim();
+    if (!serverUrl.trim()) {
+      setError('请填写电脑端地址（在电脑端「设置 → 本机同步服务」里查看局域网地址）');
+      return;
+    }
     if (!u || !password) {
       setError('请输入用户名和密码');
       return;
@@ -66,13 +71,13 @@ export default function LoginScreen({ navigation }) {
           style={styles.input}
           value={serverUrl}
           onChangeText={setServerUrl}
-          placeholder="http://192.168.1.100:8787"
+          placeholder="电脑局域网地址，如 192.168.0.106:8787"
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
         />
         <Text style={styles.hint}>
-          提示：真机填电脑局域网 IP（同一 Wi-Fi）；安卓模拟器访问宿主机用 http://10.0.2.2:8787
+          填电脑端「设置 → 本机同步服务」中显示的地址（可省略 http://）。真机需与电脑连同一 Wi-Fi；安卓模拟器访问宿主机用 http://10.0.2.2:8787
         </Text>
 
         <Text style={styles.label}>用户名</Text>

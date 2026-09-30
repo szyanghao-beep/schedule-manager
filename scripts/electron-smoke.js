@@ -57,10 +57,32 @@ async function main() {
     let settingsErr = null;
     try { window.App.switchView('settings'); } catch (e) { settingsErr = String(e && e.message || e); }
     out.settingsError = settingsErr;
+    // 「多端同步」卡片内容由 syncStatus() 异步填充（IPC 往返），需等一拍再读，
+    // 否则会误判为「按钮不存在」
+    await new Promise(function (r) { setTimeout(r, 500); });
     const sEl = document.getElementById('view-settings');
     out.settingsHtmlLen = sEl ? sEl.innerHTML.length : 0;
     out.settingsHasSyncServer = sEl ? sEl.textContent.indexOf('本机同步服务') >= 0 : false;
     out.settingsHasSyncCard = sEl ? sEl.textContent.indexOf('多端同步') >= 0 : false;
+    // 3b) 同步服务器地址可修改（本次修复：此前设置里无处可改 IP）
+    out.hasSyncSetServer = typeof window.API.syncSetServer === 'function';
+    out.hasNormalizeUtil = !!(window.Utils && typeof window.Utils.normalizeServerUrl === 'function');
+    out.settingsHasFillLocalBtn = sEl ? sEl.textContent.indexOf('填入本机地址') >= 0 : false;
+    // 真调一次：只填 IP:端口（漏协议）应被自动补全 http://
+    try {
+      out.setServerRes = await window.API.syncSetServer('192.168.0.99:8787');
+      const st2 = await window.API.syncStatus();
+      out.setServerStatusUrl = st2 ? st2.serverUrl : null;
+    } catch (e) {
+      out.setServerError = String(e && e.message || e);
+    }
+    // 空地址应被拒绝（不能静默写入空地址导致后续同步静默失败）
+    try {
+      await window.API.syncSetServer('   ');
+      out.setServerEmptyAccepted = true;
+    } catch (e) {
+      out.setServerEmptyRejected = true;
+    }
     // 4) 真实渲染客户页
     let custErr = null;
     try { window.App.switchView('customer'); } catch (e) { custErr = String(e && e.message || e); }
@@ -95,6 +117,17 @@ async function main() {
   check('设置页有内容', result.settingsHtmlLen > 500, 'len=' + result.settingsHtmlLen);
   check('★ 设置页含「本机同步服务」卡片', result.settingsHasSyncServer === true);
   check('设置页含「多端同步」卡片（此前被中断的后续卡片）', result.settingsHasSyncCard === true);
+
+  console.log('== 同步地址可修改（用户痛点：无法改 IP）==');
+  check('API 含 syncSetServer（设置里可改服务器地址）', result.hasSyncSetServer === true);
+  check('渲染层已加载 Utils.normalizeServerUrl（地址容错共用实现）', result.hasNormalizeUtil === true);
+  check('登录表单含「填入本机地址」一键按钮', result.settingsHasFillLocalBtn === true);
+  check('syncSetServer 自动补 http://（只填 IP:端口 也能用）',
+    !!result.setServerRes && result.setServerRes.serverUrl === 'http://192.168.0.99:8787',
+    result.setServerError || JSON.stringify(result.setServerRes));
+  check('改地址后 syncStatus 与之一致', result.setServerStatusUrl === 'http://192.168.0.99:8787',
+    String(result.setServerStatusUrl));
+  check('空地址被拒绝（不会静默写入空地址）', result.setServerEmptyRejected === true);
 
   console.log('== 客户页渲染（本版本新功能）==');
   check('客户页渲染无异常', result.customerError === null, result.customerError || '');

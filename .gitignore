@@ -33,3 +33,7 @@ server/.secret
 .e2e-probe.png
 .e2e-shots/
 .smoke-userdata/
+
+# 用户反馈截图（不纳入版本库）
+*.jpg
+*.jpeg

@@ -27,6 +27,7 @@ window.API = {
   syncPush: function () { return window.api.syncPush(); },
   syncNow: function () { return window.api.syncNow(); },
   syncStatus: function () { return window.api.syncStatus(); },
+  syncSetServer: function (serverUrl) { return window.api.syncSetServer(serverUrl); },
   syncLogout: function () { return window.api.syncLogout(); },
   onSyncDataUpdated: function (cb) { window.api.onSyncDataUpdated(cb); },
   onSyncConflict: function (cb) { window.api.onSyncConflict(cb); },

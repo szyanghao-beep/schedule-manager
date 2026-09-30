@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   syncPush: function () { return ipcRenderer.invoke('sync:push'); },
   syncNow: function () { return ipcRenderer.invoke('sync:now'); },
   syncStatus: function () { return ipcRenderer.invoke('sync:status'); },
+  syncSetServer: function (serverUrl) { return ipcRenderer.invoke('sync:set-server', serverUrl); },
   syncLogout: function () { return ipcRenderer.invoke('sync:logout'); },
   onSyncDataUpdated: function (cb) { ipcRenderer.on('sync-data-updated', function () { cb(); }); },
   onSyncConflict: function (cb) { ipcRenderer.on('sync-conflicts', function (e, payload) { cb(payload); }); },

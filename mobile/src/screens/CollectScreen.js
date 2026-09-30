@@ -120,7 +120,7 @@ export default function CollectScreen() {
             style={styles.input}
             value={url}
             onChangeText={setUrl}
-            placeholder="http://192.168.1.5:8787"
+            placeholder="如 192.168.0.106:8787（可省略 http://）"
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"

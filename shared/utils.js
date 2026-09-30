@@ -512,8 +512,20 @@
     return summary;
   }
 
+  // ---- 服务器地址归一化（桌面端 / 手机端共用单一实现） ----
+  // 用户手输地址是常态：可能带首尾空格、漏写 http://、末尾多斜杠。
+  // 曾因桌面端与手机端各写一份、容错不一致而出现「电脑能连、手机连不上」。
+  // 返回 '' 表示空输入，由调用方决定报错文案。
+  function normalizeServerUrl(raw) {
+    var u = String(raw == null ? '' : raw).trim().replace(/\/+$/, '');
+    if (!u) return '';
+    if (!/^https?:\/\//i.test(u)) u = 'http://' + u;
+    return u;
+  }
+
   return {
     STATUS: STATUS,
+    normalizeServerUrl: normalizeServerUrl,
     REPEAT_TYPE: REPEAT_TYPE,
     IMPORTANCE: IMPORTANCE,
     QUADRANT: QUADRANT,

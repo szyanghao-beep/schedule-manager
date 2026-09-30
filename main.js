@@ -362,6 +362,11 @@ function syncStatePath() { return path.join(app.getPath('userData'), SYNC_STATE_
 
 function syncAuthed() { return !!(syncState.serverUrl && syncState.token); }
 
+// 归一化同步服务器地址（复用 shared 单一实现，与手机端容错保持一致）
+function normalizeServerUrl(raw) {
+  return Utils.normalizeServerUrl(raw);
+}
+
 // 持久化同步登录态与游标（token 用系统安全存储加密，避免明文落盘）
 function persistSyncState() {
   try {
@@ -660,6 +665,15 @@ async function syncRequest(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   });
   const json = await res.json().catch(function () { return {}; });
+  if (res.status === 401) {
+    // token 失效（常见于「改了服务器地址，指向另一台服务器」或服务端重置）
+    // 清掉本地登录态，让界面回到登录表单，而不是反复抛 HTTP 401 让用户无从下手
+    syncState.token = '';
+    syncState.lastPulledAt = 0;
+    syncState.lastPushedAt = 0;
+    persistSyncState();
+    throw new Error('登录已失效，请在设置中重新登录（服务器：' + syncState.serverUrl + '）');
+  }
   if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
   return json;
 }
@@ -1071,7 +1085,8 @@ function registerIpc() {
     if (!opts.serverUrl || !opts.username || !opts.password) {
       throw new Error('请填写服务器地址、用户名和密码');
     }
-    syncState.serverUrl = String(opts.serverUrl).replace(/\/+$/, '');
+    syncState.serverUrl = normalizeServerUrl(opts.serverUrl);
+    if (!syncState.serverUrl) throw new Error('请填写服务器地址');
     const path = opts.register ? '/api/auth/register' : '/api/auth/login';
     const json = await syncRequest('POST', path, { username: opts.username, password: opts.password });
     syncState.token = json.token;
@@ -1085,6 +1100,19 @@ function registerIpc() {
   ipcMain.handle('sync:push', function () { return syncPush(); });
   ipcMain.handle('sync:now', function () { return syncNow(); });
 
+  // 修改同步服务器地址（保留登录态，无需退出重登）
+  ipcMain.handle('sync:set-server', function (e, serverUrl) {
+    const u = normalizeServerUrl(serverUrl);
+    if (!u) throw new Error('请填写服务器地址');
+    if (u === syncState.serverUrl) return { serverUrl: u, changed: false };
+    syncState.serverUrl = u;
+    // 换了地址（可能是另一台服务器）→ 重置同步游标，下次同步做全量对齐，避免漏数据
+    syncState.lastPulledAt = 0;
+    syncState.lastPushedAt = 0;
+    persistSyncState();
+    return { serverUrl: u, changed: true };
+  });
+
   ipcMain.handle('sync:status', function () {
     return {
       serverUrl: syncState.serverUrl,
@@ -1095,7 +1123,9 @@ function registerIpc() {
   });
 
   ipcMain.handle('sync:logout', function () {
-    syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 };
+    // 保留 serverUrl：退出登录后重新登录时表单可预填，无需再手输 IP
+    // （曾经整块重置导致用户每次换网络/重登都要重新回忆地址）
+    syncState = { serverUrl: syncState.serverUrl, token: '', lastPulledAt: 0, lastPushedAt: 0 };
     persistSyncState();
     return true;
   });
