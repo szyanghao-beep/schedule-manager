@@ -181,6 +181,31 @@ jsdom 30 的 `engines`（要求 `^22.22.2 || ^24.15.0`）在 Node 20 上只是 `
   tag 移到含修复的提交再推，否则重推同一个 tag 依旧跑旧配置。
 - 判断「发布成功」要看 **Actions 运行结论 + Release 是否存在**，不能只看 tag 在不在。
 
+#### ⑩ 手机端 APK 没能随 Release 发布（用户问「手机端更新了吗」才发现）
+
+**现象**：Release 页上只有桌面端安装包，**没有安卓 APK**；而手机端代码本次确实改了
+（新增「客户」Tab、地址容错、store 客户方法）。
+
+**根因**：`build-apk.yml` 只在 `branches: [main]` 触发，**tag 发布时根本不跑**；
+它的产物也只作为 **Actions artifact**（需登录 GitHub 下载、90 天过期），从不进 Release。
+另外安卓版本号长期停在 `versionCode 1 / versionName "1.0"`，
+装上去看不出版本、系统也不提示更新。
+
+**修复**：
+1. `build.yml` 新增 `android` job（步骤与已验证的 `build-apk.yml` 一致），
+   并把 `release.needs` 扩为 `[mac, win, android]` —— APK 从此随 Release 发布。
+2. APK 文件名规范化为纯 ASCII（`schedule-manager-android-<版本>.apk`），
+   避免 GitHub 剥掉非 ASCII。
+3. `mobile/android/app/build.gradle`：`versionCode 2`、`versionName "2.3.4"`，
+   与桌面端发布版本对齐。
+4. **让「重跑发布」幂等**：release job 在**上传之后**删除不在本次产物清单里的陈旧资产。
+   顺序刻意如此——反过来（先清后传）一旦上传失败会留下**空 Release**，
+   比留着陈旧资产糟糕得多。有了这步，本次才敢重打 v2.3.4 标签，
+   把早先那 4 个被剥掉中文的残缺资产一并清掉。
+5. 契约测试锁死这两件事：`mobile.contract.test.js` 校验「安卓 versionName ==
+   package.json 版本」（防两端漂移，已反向验证会变红），以及「build.yml 的
+   release.needs 必须包含 android」（防 APK 再次漏出 Release）。
+
 #### ⑨ 发布产物名被 GitHub 剥掉中文（从 v1.1.0 起一直如此）
 
 **现象**：Release 页上的产物名是 `-2.3.4-arm64-mac.zip`、`Setup.2.3.4.exe`

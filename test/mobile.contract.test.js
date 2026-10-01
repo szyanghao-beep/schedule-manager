@@ -136,3 +136,45 @@ test('手机端用到的 constants.XXX 都在 shared/constants.js 中真实存�
   assert.deepStrictEqual(Array.from(new Set(bad)), [],
     '引用了不存在的常量：' + Array.from(new Set(bad)).join(', '));
 });
+
+test('安卓端 versionName 与发布版本一致（防两端版本漂移）', function () {
+  // 安卓 APK 的版本号曾经长期停在 versionCode 1 / versionName "1.0"：
+  // 装上去看不出版本、系统也不提示更新，用户无法判断自己装的是哪一版。
+  // APK 是跟着发布版本一起发的，所以两者必须一致。
+  const gradle = read('mobile/android/app/build.gradle');
+  const nameMatch = /versionName\s+"([^"]+)"/.exec(gradle);
+  const codeMatch = /versionCode\s+(\d+)/.exec(gradle);
+  assert.ok(nameMatch, '应能从 mobile/android/app/build.gradle 解析出 versionName');
+  assert.ok(codeMatch, '应能从 mobile/android/app/build.gradle 解析出 versionCode');
+
+  const pkgVersion = require(path.join(ROOT, 'package.json')).version;
+  assert.strictEqual(
+    nameMatch[1], pkgVersion,
+    '安卓 versionName（' + nameMatch[1] + '）应与 package.json 版本（' + pkgVersion +
+    '）一致；发新版时两者都要改'
+  );
+
+  const code = Number(codeMatch[1]);
+  assert.ok(Number.isInteger(code) && code >= 1, 'versionCode 应是 ≥1 的整数，实际 ' + codeMatch[1]);
+});
+
+test('安卓 APK 会随 Release 一起发布（不能只作为 Actions artifact）', function () {
+  // artifact 需要登录 GitHub 才能下载、且 90 天过期；
+  // 用户是从 Release 页取安装包的，所以 APK 必须进 Release。
+  const build = read('.github/workflows/build.yml');
+  assert.ok(/android:/.test(build), 'build.yml 应有 android job 构建 APK');
+  assert.ok(
+    /needs:\s*\[[^\]]*android[^\]]*\]/.test(build),
+    'release job 的 needs 里应包含 android，否则 APK 不会进 Release'
+  );
+  assert.ok(
+    /assembleRelease/.test(build),
+    'android job 应用 assembleRelease 构建（debug 版不打包 JS bundle，装上去会红屏）'
+  );
+  // tag 触发的工作流用的是该 tag 所指提交里的 workflow 文件，
+  // 所以 release job 里必须清理旧资产，保证重跑幂等（否则改名后新旧两套并存）
+  assert.ok(
+    /delete-asset/.test(build),
+    'release job 应在上传前清理该 tag 下的旧资产，保证重跑幂等'
+  );
+});
