@@ -59,11 +59,12 @@
           ]
         }
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "artifactName": "schedule-manager-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
       "title": "日程管理 ${version}",
-      "artifactName": "${productName}-${version}.${ext}"
+      "artifactName": "schedule-manager-${version}-${arch}.${ext}"
     },
     "win": {
       "target": [
@@ -74,7 +75,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "artifactName": "schedule-manager-Setup-${version}.${ext}"
     }
   },
   "dependencies": {

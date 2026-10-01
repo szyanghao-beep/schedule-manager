@@ -181,6 +181,25 @@ jsdom 30 的 `engines`（要求 `^22.22.2 || ^24.15.0`）在 Node 20 上只是 `
   tag 移到含修复的提交再推，否则重推同一个 tag 依旧跑旧配置。
 - 判断「发布成功」要看 **Actions 运行结论 + Release 是否存在**，不能只看 tag 在不在。
 
+#### ⑨ 发布产物名被 GitHub 剥掉中文（从 v1.1.0 起一直如此）
+
+**现象**：Release 页上的产物名是 `-2.3.4-arm64-mac.zip`、`Setup.2.3.4.exe`
+——开头的「日程管理」不见了。
+
+**根因**：`artifactName` 用了 `productName`（中文「日程管理」），而
+**GitHub 上传 Release 资产时会剥掉非 ASCII 字符**，于是
+`日程管理-2.3.4.dmg` → `-2.3.4.dmg`、`日程管理 Setup 2.3.4.exe` → `Setup.2.3.4.exe`。
+（zip 目标没配 `artifactName`，用的是 electron-builder 默认名，同样带中文、同样被剥。）
+
+**修复**：mac / dmg / nsis 三段都改用纯 ASCII 的 `artifactName`：
+`schedule-manager-${version}-mac-${arch}.zip`、
+`schedule-manager-${version}-${arch}.dmg`、
+`schedule-manager-Setup-${version}.exe`。
+本地实打验证过：产出 `schedule-manager-Setup-2.3.4.exe`，且 CI 里 `dist/*.exe`
+`dist/*.dmg` 的上传通配仍然匹配。**注意本地安装包文件名随之变为英文**
+（`dist\schedule-manager-Setup-2.3.4.exe`），中文名在 Windows 上没问题、
+但在 GitHub 上留不住，统一用 ASCII 更省事。
+
 ### v2.3.3（2026-09-19）— 修复「安装后设置页缺少本机同步服务」
 
 **问题**：安装 v2.3.2 后，设置页看不到「本机同步服务」卡片（其后的「多端同步」卡片也一并消失）。
