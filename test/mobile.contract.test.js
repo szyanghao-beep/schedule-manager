@@ -184,6 +184,14 @@ test('安卓 APK 会随 Release 一起发布（不能只作为 Actions artifact�
     !/gh release delete-asset/.test(build),
     '不要用 gh release delete-asset（按名字传参，遇到以 - 开头的资产名会失败）'
   );
+  // 清理属收尾工作，产物此时已发布成功，不该因它把整次发布判为失败
+  // （实际踩过：android/mac/win/test 全 success、产物也传上去了，只因清理步骤
+  //  报错就让 release job 变红，看起来像「发布失败」）
+  const cleanupStep = build.slice(build.indexOf('清理不在本次产物清单里'));
+  assert.ok(
+    /continue-on-error:\s*true/.test(cleanupStep.slice(0, 200)) && /set \+e/.test(build),
+    '清理步骤应设 continue-on-error 并在脚本里 set +e，避免收尾失败让发布被判失败'
+  );
 
   // 结构自检：六个 job 都要在（2 空格缩进的顶层键），防误删/改名后静默失效。
   // 注：这里只做轻量结构检查；完整的 YAML 合法性靠 push 前人工用解析器验证
