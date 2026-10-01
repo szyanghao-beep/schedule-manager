@@ -13,7 +13,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # 必须 ≥22：① 内嵌同步服务用 node:sqlite（Node 20 没有此模块，
+          # test/system.contract.test.js 会 require 它 → 整个 test job 崩，
+          # 而 release job needs [mac, win] ← needs [test]，于是永远发不出 Release）；
+          # ② jsdom 30 的 engines 要求 ^22.22.2 || ^24.15.0。
+          # 用 24 与本机验证过的版本一致（Node 20 已 EOL）。
+          node-version: 24
           cache: npm
       - run: npm ci
       - run: npm test

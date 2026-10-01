@@ -155,6 +155,22 @@ test('内嵌同步服务器的必需模块都能被主进程 require', function 
   assert.ok(fs.existsSync(path.join(ROOT, 'server/src/app.js')), 'server/src/app.js 缺失');
   assert.ok(fs.existsSync(path.join(ROOT, 'server/src/db.js')), 'server/src/db.js 缺失');
 
+  // db.js 依赖 Node 内置的 node:sqlite（Node 22.5+ 才有）。
+  // 先显式检查并给出可操作的提示，而不是抛一串模块找不到的栈：
+  // 曾经 CI 用 Node 20 跑这一步直接崩，导致 test job 失败 → release job 永不执行
+  // → v2.3.3 / v2.3.4 连续两个版本在 GitHub 上都没发出 Release，而本地全绿。
+  let hasSqlite = true;
+  try {
+    require('node:sqlite');
+  } catch (e) {
+    hasSqlite = false;
+  }
+  assert.ok(
+    hasSqlite,
+    '当前 Node ' + process.version + ' 没有内置 node:sqlite（内嵌同步服务需要它，Node 22.5+ 起提供）。' +
+    '请升级 Node（本仓库 package.json 的 engines 已声明要求）；CI 的 build.yml 里 test job 也必须用同样的版本。'
+  );
+
   // 实际加载一次，确保导出符合预期（打包后 require 才不会是运行时炸弹）
   const { createApp } = require('../server/src/app.js');
   const { createDb } = require('../server/src/db.js');

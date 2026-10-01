@@ -154,6 +154,33 @@
    已反向验证：改回旧顺序会让用例变红。
 3. **设置页「修改地址」点了没反应** —— 见上文 ⑤。
 
+#### ⑧ CI 发布失败（v2.3.3 起就没发出去，必读）
+
+**现象**：GitHub 上只有到 **v2.3.2** 的 Release，**v2.3.3 与 v2.3.4 都没有**。
+
+**定位过程**：查 Actions API 发现 `build` 工作流从 v2.3.3 起每次都 `failure`，
+且失败点完全相同——`test` job 的 `Run npm test`（`npm ci` 是成功的）。
+`mac` / `win` / `release` 因为 `release needs [mac, win] ← needs [test]` 全部 `skipped`，
+所以**永远发不出 Release**。
+
+**根因（一个，不是两个）**：CI 的 `test` job 用 **Node 20**，而
+`test/system.contract.test.js` 会 `require('../server/src/db.js')` 来验证
+「内嵌服务器模块可加载」，`db.js` 用了 **`node:sqlite`——Node 20 里没有这个模块**
+→ 该文件直接抛错、`npm test` 失败。
+本机是 Node 24（`node:sqlite` 可用），所以本地一直全绿，典型的「本地过、CI 挂」。
+
+**修复**：`build.yml` 的 `test` job 升到 **Node 24**（本机验证过的版本）。
+只改这一个 job：`mac`/`win` 的打包环境有 v2.3.2 的成功记录，且仓库无 `.npmrc`，
+jsdom 30 的 `engines`（要求 `^22.22.2 || ^24.15.0`）在 Node 20 上只是 `EBADENGINE`
+警告、不会让 `npm ci` 失败——不动它们以免引入无法本地验证的新风险。
+
+**教训**：
+- **CI 的 Node 版本必须 ≥ 项目实际用到的内置模块所需版本**。引入 `node:sqlite`
+  （Node 22.5+）时就该同步升 CI，否则测试门禁一直红而本地毫无察觉。
+- **tag 触发的工作流用的是「该 tag 所指向提交」里的 workflow 文件**——修完 CI 必须把
+  tag 移到含修复的提交再推，否则重推同一个 tag 依旧跑旧配置。
+- 判断「发布成功」要看 **Actions 运行结论 + Release 是否存在**，不能只看 tag 在不在。
+
 ### v2.3.3（2026-09-19）— 修复「安装后设置页缺少本机同步服务」
 
 **问题**：安装 v2.3.2 后，设置页看不到「本机同步服务」卡片（其后的「多端同步」卡片也一并消失）。
