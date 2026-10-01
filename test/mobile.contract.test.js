@@ -172,9 +172,26 @@ test('安卓 APK 会随 Release 一起发布（不能只作为 Actions artifact�
     'android job 应用 assembleRelease 构建（debug 版不打包 JS bundle，装上去会红屏）'
   );
   // tag 触发的工作流用的是该 tag 所指提交里的 workflow 文件，
-  // 所以 release job 里必须清理旧资产，保证重跑幂等（否则改名后新旧两套并存）
+  // 所以 release job 里必须清理陈旧资产，保证重跑幂等（否则改名后新旧两套并存）
   assert.ok(
-    /delete-asset/.test(build),
-    'release job 应在上传前清理该 tag 下的旧资产，保证重跑幂等'
+    /cleanup|清理/.test(build) && /releases\/assets\//.test(build),
+    'release job 应在上传后清理陈旧资产以保证重跑幂等；' +
+    '且必须按「资产 id」删除（gh api -X DELETE .../releases/assets/<id>）——' +
+    '陈旧资产名可能以 "-" 开头（中文被 GitHub 剥掉后就是 -2.3.4.dmg），' +
+    '把名字当参数传给 gh 会被当成命令行选项而报错'
   );
+  assert.ok(
+    !/gh release delete-asset/.test(build),
+    '不要用 gh release delete-asset（按名字传参，遇到以 - 开头的资产名会失败）'
+  );
+
+  // 结构自检：六个 job 都要在（2 空格缩进的顶层键），防误删/改名后静默失效。
+  // 注：这里只做轻量结构检查；完整的 YAML 合法性靠 push 前人工用解析器验证
+  // （格式错会导致整条流水线不触发，比 job 失败更隐蔽）。
+  ['test', 'server-test', 'mac', 'win', 'android', 'release'].forEach(function (j) {
+    assert.ok(
+      new RegExp('(^|\\n) {2}' + j + ':').test(build),
+      'build.yml 缺少 job：' + j
+    );
+  });
 });

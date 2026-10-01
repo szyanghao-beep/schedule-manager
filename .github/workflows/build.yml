@@ -133,12 +133,22 @@ jobs:
         run: |
           find artifacts -maxdepth 1 -type f -printf '%f\n' | sort > /tmp/want.txt
           echo "== 本次产物 =="; cat /tmp/want.txt
-          gh release view "${GITHUB_REF_NAME}" --json assets --jq '.assets[].name' | sort > /tmp/have.txt
-          comm -13 /tmp/want.txt /tmp/have.txt > /tmp/stale.txt || true
-          if [ -s /tmp/stale.txt ]; then
-            while read -r n; do
-              if [ -n "$n" ]; then echo "删除陈旧资产: $n"; gh release delete-asset "${GITHUB_REF_NAME}" "$n" -y; fi
-            done < /tmp/stale.txt
+          # 必须用「资产 id」删除，不能把名字当参数传给 gh：
+          # 陈旧资产名可能以 '-' 开头（如 -2.3.4.dmg —— 中文被 GitHub 剥掉后就是这样），
+          # 传参时会被 gh 当成命令行选项而报错，配合 bash -e 直接中断整个步骤。
+          # 本次发布就是这样失败的（上传已成功，只有清理步骤挂了）。
+          gh release view "${GITHUB_REF_NAME}" --json assets \
+            --jq '.assets[] | "\(.id)\t\(.name)"' > /tmp/have.tsv \
+            || { echo "读取资产列表失败"; exit 1; }
+          awk -F'\t' 'NR==FNR{w[$1]=1; next} !($2 in w){print $0}' \
+            /tmp/want.txt /tmp/have.tsv > /tmp/stale.tsv
+          if [ -s /tmp/stale.tsv ]; then
+            while IFS=$'\t' read -r id name; do
+              [ -z "$id" ] && continue
+              echo "删除陈旧资产: $name (id=$id)"
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/$id" >/dev/null \
+                || echo "  删除失败（忽略，不影响已发布的产物）: $name"
+            done < /tmp/stale.tsv
           else
             echo "没有需要清理的陈旧资产"
           fi
