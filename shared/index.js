@@ -6,6 +6,7 @@
 
 module.exports = {
   constants: require('./constants.js'),
+  permissions: require('./permissions.js'),
   utils: require('./utils.js'),
   migrate: require('./migrate.js'),
   sync: require('./sync.js'),

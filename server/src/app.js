@@ -5,9 +5,10 @@
 
 const express = require('express');
 const cors = require('cors');
-const { registerAuthRoutes, authenticate } = require('./auth.js');
+const { registerAuthRoutes, authenticate, requireAdmin } = require('./auth.js');
 const { registerSyncRoutes } = require('./syncRoutes.js');
 const { registerInboxDropRoute } = require('./inboxDrop.js');
+const { registerAdminRoutes } = require('./adminRoutes.js');
 
 /**
  * @param db      node:sqlite 数据库
@@ -25,7 +26,11 @@ function createApp(db, secret, options) {
   });
 
   registerAuthRoutes(app, db, secret);
-  registerSyncRoutes(app, db, authenticate(secret));
+  // 鉴权中间件带上 db：每次请求回库核对账号状态与角色，
+  // 这样「停用账号/改角色」立即生效，不用等旧 token 过期
+  const auth = authenticate(secret, db);
+  registerSyncRoutes(app, db, auth);
+  registerAdminRoutes(app, db, auth, requireAdmin);
   registerInboxDropRoute(app, options || {});
 
   // 统一错误处理
