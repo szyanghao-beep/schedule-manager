@@ -137,6 +137,32 @@ test('手机端用到的 constants.XXX 都在 shared/constants.js 中真实存�
     '引用了不存在的常量：' + Array.from(new Set(bad)).join(', '));
 });
 
+test('手机端按权限隐藏 Tab（与桌面端同一套规则，未登录不限制）', function () {
+  const app = read('mobile/App.js');
+  const storeSrc = read('mobile/src/store.js');
+
+  // store 侧必须提供角色/权限派生（未登录返回 null = 不限制）
+  assert.ok(/function getPermissions/.test(storeSrc), 'store 应导出 getPermissions');
+  assert.ok(/function canAccess/.test(storeSrc), 'store 应提供 canAccess');
+  assert.ok(/if \(!state\.token\) return null;/.test(storeSrc),
+    '未登录时 getPermissions 应返回 null（纯本地使用不受权限限制）');
+
+  // App 侧必须按权限决定三个功能 Tab 是否渲染
+  ['schedule', 'todo', 'customer'].forEach(function (key) {
+    assert.ok(
+      app.indexOf("allowed('" + key + "')") >= 0,
+      'App.js 应通过 allowed(\'' + key + '\') 控制该 Tab 的可见性'
+    );
+  });
+
+  // 「收集」与「我的」必须无条件保留：
+  // 收集是免登录的离线随手记；我的里面有登录/账号入口，藏掉就等于把人锁在门外
+  assert.ok(/<Tab\.Screen\s+name="Collect"/.test(app), '「收集」Tab 应始终存在');
+  assert.ok(/<Tab\.Screen\s+name="Profile"/.test(app), '「我的」Tab 应始终存在');
+  assert.ok(!/allowed\('(collect|profile)'\)/.test(app),
+    '「收集」「我的」不应受权限控制');
+});
+
 test('安卓端 versionName 与发布版本一致（防两端版本漂移）', function () {
   // 安卓 APK 的版本号曾经长期停在 versionCode 1 / versionName "1.0"：
   // 装上去看不出版本、系统也不提示更新，用户无法判断自己装的是哪一版。

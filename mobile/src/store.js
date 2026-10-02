@@ -141,6 +141,27 @@ function getUser() {
   return state.user;
 }
 
+// ---- 多账号：当前账号的角色与功能权限（由登录/拉取时服务端返回的 user 派生）----
+// 未登录时返回 null，表示「不做限制」（纯本地使用不该被权限挡住）。
+// 真正的权限校验在服务端；这里只用于决定界面显示哪些 Tab。
+function getPermissions() {
+  if (!state.token) return null;
+  return shared.permissions.resolvePermissions((state.user || {}).permissions);
+}
+
+function getRole() {
+  return shared.permissions.normalizeRole((state.user || {}).role);
+}
+
+function isAdmin() {
+  return !!state.token && getRole() === shared.permissions.ROLE.ADMIN;
+}
+
+// 某功能模块当前账号能否使用（未登录 → 可用）
+function canAccess(moduleKey) {
+  return shared.permissions.canAccess(getPermissions(), moduleKey);
+}
+
 function getServerUrl() {
   return state.serverUrl;
 }
@@ -483,6 +504,11 @@ export default {
   clearSession,
   getToken,
   getUser,
+  // 多账号：角色与功能权限（未登录时不做限制）
+  getPermissions,
+  getRole,
+  isAdmin,
+  canAccess,
   getServerUrl,
   getLastSyncAt,
   getJournal,

@@ -17,6 +17,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import store from './src/store';
+import shared from './src/shared';
 import syncClient from './src/syncClient';
 import notifications from './src/notifications';
 import LoginScreen from './src/screens/LoginScreen';
@@ -38,6 +39,12 @@ function makeTabIcon(emoji) {
 }
 
 function MainTabs() {
+  // 订阅 store：管理员改了权限后，这里会跟着重算要显示哪些 Tab
+  useSyncExternalStore(store.subscribe, store.getSnapshot);
+  // 「收集」与「我的」始终可用：
+  //   收集是免登录的离线随手记，我的里面有账号/登录入口（不让进就等于把自己锁住）
+  const allowed = (key) => shared.permissions.canAccess(store.getPermissions(), key);
+
   return (
     <Tab.Navigator
       screenOptions={{
@@ -50,21 +57,27 @@ function MainTabs() {
         component={CollectScreen}
         options={{ title: '收集', headerShown: false, tabBarIcon: makeTabIcon('📥') }}
       />
-      <Tab.Screen
-        name="Events"
-        component={EventsScreen}
-        options={{ title: '日程', headerShown: false, tabBarIcon: makeTabIcon('📅') }}
-      />
-      <Tab.Screen
-        name="Todos"
-        component={TodosScreen}
-        options={{ title: '待办', tabBarIcon: makeTabIcon('✅') }}
-      />
-      <Tab.Screen
-        name="Customers"
-        component={CustomersScreen}
-        options={{ title: '客户', headerShown: false, tabBarIcon: makeTabIcon('🤝') }}
-      />
+      {allowed('schedule') ? (
+        <Tab.Screen
+          name="Events"
+          component={EventsScreen}
+          options={{ title: '日程', headerShown: false, tabBarIcon: makeTabIcon('📅') }}
+        />
+      ) : null}
+      {allowed('todo') ? (
+        <Tab.Screen
+          name="Todos"
+          component={TodosScreen}
+          options={{ title: '待办', tabBarIcon: makeTabIcon('✅') }}
+        />
+      ) : null}
+      {allowed('customer') ? (
+        <Tab.Screen
+          name="Customers"
+          component={CustomersScreen}
+          options={{ title: '客户', headerShown: false, tabBarIcon: makeTabIcon('🤝') }}
+        />
+      ) : null}
       <Tab.Screen
         name="Profile"
         component={ProfileScreen}
