@@ -144,10 +144,19 @@ function normalizeServerUrl(u) {
 }
 
 function createApiStub(overrides) {
+  // 管理员判定的唯一来源：角色。不要依赖 state.sync.isAdmin（见下方注释）
+  const isAdminNow = function () { return state.sync.role === 'admin'; };
   const state = {
     email: emailStatusFrom(null, null),
     ai: aiStatusFrom(null, null),
-    sync: { loggedIn: false, serverUrl: '' },
+    // 多账号：loggedIn 之外还要有 role/permissions，渲染层据此控制导航显隐。
+    // 默认「已登录的普通用户 + 全部功能」，各用例可覆写 state.sync 来测权限过滤。
+    sync: {
+      loggedIn: false, serverUrl: '',
+      role: 'user', isAdmin: false, permissions: null, displayName: '',
+    },
+    // 管理员接口的假数据：users 可由用例直接替换
+    admin: { users: [], modules: null, failWith: null },
   };
 
   // 默认实现（返回值会被 Promise.resolve 包装，模拟 ipcRenderer.invoke）
@@ -181,7 +190,12 @@ function createApiStub(overrides) {
     syncPull: function () { return { pulled: 0, pushed: 0 }; },
     syncPush: function () { return { pushed: 0, pulled: 0 }; },
     syncNow: function () { return { pushed: 0, pulled: 0 }; },
-    syncStatus: function () { return Object.assign({}, state.sync); },
+    // isAdmin 由 role 推导，避免用例里两处状态要同步设置
+    syncStatus: function () {
+      const s = Object.assign({}, state.sync);
+      s.isAdmin = s.role === 'admin';
+      return s;
+    },
     syncSetServer: function (serverUrl) {
       const u = normalizeServerUrl(serverUrl);
       if (!u) throw new Error('请填写服务器地址'); // main.js 同款校验，空地址 invoke 失败
@@ -189,7 +203,52 @@ function createApiStub(overrides) {
       state.sync.serverUrl = u;
       return { serverUrl: u, changed: true };
     },
-    syncLogout: function () { state.sync.loggedIn = false; return { ok: true }; },
+    syncLogout: function () { state.sync.loggedIn = false; state.sync.role = 'user'; return { ok: true }; },
+    // 多账号：刷新当前账号资料
+    syncMe: function () { return { user: { id: 1, username: 'me', role: state.sync.role, permissions: state.sync.permissions } }; },
+    // 管理员接口（普通用户调用时抛错，与服务端 403 的语义一致）。
+    // ⚠️ 管理员判定一律从 state.sync.role 推导，不要读 state.sync.isAdmin ——
+    //    那个字段只在默认 syncStatus 里临时算出来的，不会被写回，
+    //    读它会永远是 false（曾经因此让所有管理页用例都拿到「需要管理员权限」）。
+    adminOverview: function () {
+      if (!isAdminNow()) throw new Error('需要管理员权限');
+      const users = state.admin.users;
+      return {
+        totalUsers: users.length,
+        activeUsers: users.filter(function (u) { return u.status === 'active'; }).length,
+        disabledUsers: users.filter(function (u) { return u.status !== 'active'; }).length,
+        adminUsers: users.filter(function (u) { return u.role === 'admin'; }).length,
+        totalRecords: users.reduce(function (n, u) { return n + (u.recordCount || 0); }, 0),
+      };
+    },
+    adminListUsers: function () {
+      if (!isAdminNow()) throw new Error('需要管理员权限');
+      if (state.admin.failWith) throw new Error(state.admin.failWith);
+      return {
+        users: state.admin.users,
+        modules: state.admin.modules || undefined,
+        me: state.sync.userId || 1,
+      };
+    },
+    adminCreateUser: function (payload) {
+      if (!isAdminNow()) throw new Error('需要管理员权限');
+      state.admin.lastCreate = payload;
+      return { user: Object.assign({ id: Date.now(), role: 'user', status: 'active', permissions: [] }, payload) };
+    },
+    adminUpdateUser: function (id, patch) {
+      if (!isAdminNow()) throw new Error('需要管理员权限');
+      state.admin.lastPatch = { id: id, patch: patch };
+      const u = state.admin.users.find(function (x) { return x.id === id; });
+      if (u) Object.assign(u, patch);
+      return { user: u };
+    },
+    adminDeleteUser: function (id) {
+      if (!isAdminNow()) throw new Error('需要管理员权限');
+      state.admin.lastDelete = id;
+      const before = state.admin.users.length;
+      state.admin.users = state.admin.users.filter(function (x) { return x.id !== id; });
+      return { ok: true, removedRecords: before - state.admin.users.length };
+    },
     syncServerStatus: function () { return { running: false, ips: [], port: 8787 }; },
     syncServerStart: function () {
       return { running: true, port: 8787, ips: ['192.168.0.106'], url: 'http://192.168.0.106:8787', pairingCode: '246810' };

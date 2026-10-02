@@ -22,6 +22,8 @@
         <button class="nav-item" data-view="search">搜索</button>
         <button class="nav-item" data-view="stats">统计</button>
         <button class="nav-item" data-view="settings">设置</button>
+        <!-- 仅管理员可见（由 app.js 按角色控制显隐；保留在 DOM 中以便测试与恢复） -->
+        <button class="nav-item nav-item-admin" data-view="admin" hidden>用户管理</button>
       </nav>
     </aside>
     <main class="content">
@@ -36,16 +38,19 @@
       <section id="view-search" class="view"></section>
       <section id="view-stats" class="view"></section>
       <section id="view-settings" class="view"></section>
+      <section id="view-admin" class="view"></section>
     </main>
   </div>
 
   <div id="modal-root"></div>
   <div id="toast-root"></div>
   <div id="context-menu-root"></div>
+  <div id="guide-root"></div>
 
   <script src="../../shared/utils.js"></script>
   <script src="../../shared/customer.js"></script>
   <script src="../../shared/links.js"></script>
+  <script src="../../shared/permissions.js"></script>
   <script src="../../shared/vendor/lunar.js"></script>
   <script src="../../shared/lunar.js"></script>
   <script src="../../shared/nlp.js"></script>
@@ -57,6 +62,7 @@
   <script src="js/components/toast.js"></script>
   <script src="js/components/modal.js"></script>
   <script src="js/components/contextMenu.js"></script>
+  <script src="js/components/guide.js"></script>
   <script src="js/modules/schedule.js"></script>
   <script src="js/modules/todo.js"></script>
   <script src="js/modules/customer.js"></script>
@@ -68,6 +74,7 @@
   <script src="js/modules/review.js"></script>
   <script src="js/modules/memorials.js"></script>
   <script src="js/modules/bookkeeping.js"></script>
+  <script src="js/modules/admin.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

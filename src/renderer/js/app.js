@@ -16,12 +16,58 @@ window.App = (function () {
     search: window.Modules.search,
     stats: window.Modules.stats,
     settings: window.Modules.settings,
+    admin: window.Modules.admin,
   };
   let currentView = 'schedule';
+  // 当前账号的访问控制信息（来自主进程 sync:status；未登录时视为普通用户 + 全部功能）
+  let access = { loggedIn: false, isAdmin: false, permissions: null };
+  // 新手引导还没结束时先不弹功能提示卡，免得引导弹窗和提示卡一起冒出来
+  let tipsReady = false;
 
   function renderCurrent() {
     const mod = MODULES[currentView];
     if (mod && mod.render) mod.render();
+  }
+
+  // 按角色与权限控制导航项显隐：
+  //   - 「用户管理」只给管理员；
+  //   - 其余按 permissions 过滤（「设置」永远可见，否则用户没法看引导/改密码）；
+  //   - 未登录时不做任何隐藏（纯本地使用不该被权限限制）。
+  // 注意：这只是界面层的体验优化，真正的权限校验在服务端。
+  function applyAccessControl() {
+    const navs = Array.prototype.slice.call(document.querySelectorAll('.nav-item'));
+    const P = window.PermUtil;
+    let firstVisible = null;
+
+    navs.forEach(function (btn) {
+      const view = btn.dataset.view;
+      let visible;
+      if (view === 'admin') {
+        visible = !!access.isAdmin;
+      } else if (!access.loggedIn) {
+        visible = true;
+      } else {
+        visible = P.canAccess(access.permissions, view);
+      }
+      btn.hidden = !visible;
+      if (visible && !firstVisible) firstVisible = view;
+    });
+
+    // 当前视图被隐藏了（比如刚被管理员取消权限）→ 切到第一个可见视图
+    const currentBtn = navs.find(function (b) { return b.dataset.view === currentView; });
+    if (currentBtn && currentBtn.hidden && firstVisible) switchView(firstVisible);
+  }
+
+  function loadAccess() {
+    return API.syncStatus().then(function (st) {
+      access = {
+        loggedIn: !!(st && st.loggedIn),
+        isAdmin: !!(st && st.isAdmin),
+        permissions: st ? st.permissions : null,
+      };
+      applyAccessControl();
+      return access;
+    }).catch(function () { return access; });
   }
 
   // 应用主题：settings.theme = light | dark | system（跟随系统）
@@ -86,7 +132,17 @@ window.App = (function () {
     API.loadData().then(function (loaded) {
       Store.set(loaded);
       applyTheme();
+      return loadAccess();
+    }).then(function () {
       switchView('schedule');
+      // 新手引导：只在第一次（或引导版本更新后）自动弹出，老用户点「跳过引导」即可
+      if (window.Guide) {
+        if (window.Guide.shouldShowOnboarding()) {
+          window.Guide.openOnboarding({});
+        } else {
+          tipsReady = true;
+        }
+      }
     });
 
     // 跟随系统时，系统主题切换即时生效
@@ -99,6 +155,10 @@ window.App = (function () {
   }
 
   function switchView(view) {
+    // 无权限/不可见的视图不允许切入（快捷键、引导跳转等入口都走这里）
+    const target = document.querySelector('.nav-item[data-view="' + view + '"]');
+    if (target && target.hidden) return;
+
     currentView = view;
     document.querySelectorAll('.nav-item').forEach(function (b) {
       b.classList.toggle('active', b.dataset.view === view);
@@ -107,7 +167,12 @@ window.App = (function () {
       s.classList.toggle('active', s.id === 'view-' + view);
     });
     renderCurrent();
+    // 进入功能时给初学者一句「这是做什么的」；看过/关过的不会再弹
+    if (tipsReady && window.Guide) window.Guide.showTip(view);
   }
+
+  // 引导结束（完成或跳过）后，功能提示卡才开始工作
+  function onGuideDone() { tipsReady = true; }
 
   // 点击通知：定位到对应视图并弹出「操作条」（完成 / 稍后 10 分钟 / 稍后 1 小时）
   function showReminderAction(payload) {
@@ -168,5 +233,15 @@ window.App = (function () {
 
   document.addEventListener('DOMContentLoaded', init);
 
-  return { switchView: switchView, getView: function () { return currentView; } };
+  return {
+    switchView: switchView,
+    getView: function () { return currentView; },
+    // 登录/退出/被改权限后调用：重新拉取角色与权限并刷新导航显隐
+    refreshAccess: function () { return loadAccess(); },
+    getAccess: function () { return access; },
+    onGuideDone: onGuideDone,
+    // 供测试与引导判断用
+    isTipsReady: function () { return tipsReady; },
+    setTipsReady: function (v) { tipsReady = !!v; },
+  };
 })();

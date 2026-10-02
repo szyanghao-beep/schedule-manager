@@ -126,8 +126,64 @@ window.Modules.settings = (function () {
     // 本机同步服务（内嵌后端）
     root.appendChild(syncServerCard());
 
-    // 多端同步
+    // 多端同步 + 账号
     root.appendChild(syncCard());
+
+    // 新手引导与功能提示（老用户可在这里一键关掉全部提示，也能随时重新打开）
+    root.appendChild(guideCard());
+  }
+
+  // 新手引导与功能提示
+  function guideCard() {
+    const card = el('div', 'card');
+    card.style.marginTop = '16px';
+    card.appendChild(el('div', 'panel-title', '新手引导与功能提示'));
+
+    const G = window.Guide;
+    const hint = el('div', 'item-meta',
+      '每个功能第一次进入时会弹出一个小卡片，说明它是做什么的、有哪些关键操作。' +
+      '已经熟悉的话可以关掉；以后想再看，随时回到这里。');
+    hint.style.margin = '8px 0';
+    card.appendChild(hint);
+
+    if (!G) {
+      card.appendChild(el('div', 'placeholder', '引导模块未加载'));
+      return card;
+    }
+
+    const status = el('div', 'item-meta');
+    const dismissed = G.dismissedCount();
+    status.textContent = G.tipsDisabled()
+      ? '功能提示：已全部关闭'
+      : ('功能提示：开启中' + (dismissed ? '（已单独关闭 ' + dismissed + ' 个）' : ''));
+    status.style.color = 'var(--muted)';
+    card.appendChild(status);
+
+    const bar = el('div', 'toolbar');
+    bar.style.marginTop = '8px';
+
+    const replay = el('button', 'btn btn-primary btn-sm', '重新查看新手引导');
+    replay.addEventListener('click', function () { G.openOnboarding({ force: true }); });
+    bar.appendChild(replay);
+
+    const overview = el('button', 'btn btn-sm', '各功能说明一览');
+    overview.title = '不用逐个点进去，先看一遍每个功能是干什么的';
+    overview.addEventListener('click', function () { G.openTipsOverview(); });
+    bar.appendChild(overview);
+
+    if (G.tipsDisabled()) {
+      const enable = el('button', 'btn btn-sm', '恢复功能提示');
+      enable.addEventListener('click', function () { G.enableAllTips(); render(); });
+      bar.appendChild(enable);
+    } else {
+      const disable = el('button', 'btn btn-sm', '关闭全部功能提示');
+      disable.title = '适合已经熟悉的老用户；随时可以恢复';
+      disable.addEventListener('click', function () { G.disableAllTips(); render(); });
+      bar.appendChild(disable);
+    }
+
+    card.appendChild(bar);
+    return card;
   }
 
   // 日历显示（农历/节气/节假日开关）
@@ -387,6 +443,40 @@ window.Modules.settings = (function () {
       infoRow.textContent = '已登录服务器：' + st.serverUrl;
       box.appendChild(infoRow);
 
+      // 多账号：显示当前账号与角色，并允许刷新权限
+      // （管理员改了你的权限后，点一下即可生效，不必退出重登）
+      const P = window.PermUtil;
+      const who = el('div', 'item-meta');
+      const roleLabel = P.ROLE_LABEL[P.normalizeRole(st.role)] || st.role;
+      who.textContent = '当前账号：' + (st.username || '（未命名）') + ' · ' + roleLabel +
+        ' · 可用功能：' + P.permissionSummary(st.permissions);
+      who.style.marginTop = '4px';
+      if (st.isAdmin) who.style.color = 'var(--primary)';
+      box.appendChild(who);
+
+      const refreshRow = el('div', 'toolbar');
+      refreshRow.style.marginTop = '6px';
+      const refreshPermBtn = el('button', 'btn btn-sm', '刷新我的权限');
+      refreshPermBtn.title = '管理员刚改过你的权限时，点这里立即生效';
+      refreshPermBtn.addEventListener('click', function () {
+        window.API.syncMe().then(function (res) {
+          window.Toast.success('权限已更新：' + P.permissionSummary(res.permissions));
+          if (window.App && window.App.refreshAccess) window.App.refreshAccess();
+          window.Modules.settings.render();
+        }).catch(function (e) {
+          window.Toast.error('刷新失败：' + (e.message || e));
+        });
+      });
+      refreshRow.appendChild(refreshPermBtn);
+      if (st.isAdmin) {
+        const goAdmin = el('button', 'btn btn-sm', '打开用户管理');
+        goAdmin.addEventListener('click', function () {
+          if (window.App && window.App.switchView) window.App.switchView('admin');
+        });
+        refreshRow.appendChild(goAdmin);
+      }
+      box.appendChild(refreshRow);
+
       // 「修改地址」：保留登录态，无需退出重登（换网络/服务端 IP 变更时的常用操作）
       const editBox = el('div');
       editBox.style.display = 'none';
@@ -429,6 +519,8 @@ window.Modules.settings = (function () {
       logoutBtn.addEventListener('click', function () {
         window.API.syncLogout().then(function () {
           window.Toast.success('已退出登录');
+          // 退出后要收回管理员入口，并恢复按「未登录」的导航显隐
+          if (window.App && window.App.refreshAccess) window.App.refreshAccess();
           window.API.syncStatus().then(function (s) { renderSyncContent(box, s); });
         });
       });
@@ -491,8 +583,15 @@ window.Modules.settings = (function () {
       return;
     }
     try {
-      await window.API.loginSync({ serverUrl: serverUrl, username: username, password: password, register: register });
+      const res = await window.API.loginSync({ serverUrl: serverUrl, username: username, password: password, register: register });
+      const P = window.PermUtil;
+      const isAdmin = P.isAdmin(res && res.user);
       window.Toast.success(register ? '注册并登录成功' : '登录成功');
+      // 登录后按新账号的角色/权限重算导航显隐（管理员会出现「用户管理」入口）
+      if (window.App && window.App.refreshAccess) await window.App.refreshAccess();
+      if (isAdmin) {
+        window.Toast.info('你已登录为管理员，左侧「用户管理」可管理账号与权限');
+      }
       window.Modules.settings.render();
     } catch (e) {
       window.Toast.error('登录失败：' + (e.message || e));

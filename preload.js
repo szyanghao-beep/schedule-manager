@@ -32,6 +32,13 @@ contextBridge.exposeInMainWorld('api', {
   syncNow: function () { return ipcRenderer.invoke('sync:now'); },
   syncStatus: function () { return ipcRenderer.invoke('sync:status'); },
   syncSetServer: function (serverUrl) { return ipcRenderer.invoke('sync:set-server', serverUrl); },
+  syncMe: function () { return ipcRenderer.invoke('sync:me'); },
+  // 多账号管理（管理员）
+  adminOverview: function () { return ipcRenderer.invoke('admin:overview'); },
+  adminListUsers: function () { return ipcRenderer.invoke('admin:list-users'); },
+  adminCreateUser: function (payload) { return ipcRenderer.invoke('admin:create-user', payload); },
+  adminUpdateUser: function (id, patch) { return ipcRenderer.invoke('admin:update-user', id, patch); },
+  adminDeleteUser: function (id) { return ipcRenderer.invoke('admin:delete-user', id); },
   syncLogout: function () { return ipcRenderer.invoke('sync:logout'); },
   onSyncDataUpdated: function (cb) { ipcRenderer.on('sync-data-updated', function () { cb(); }); },
   onSyncConflict: function (cb) { ipcRenderer.on('sync-conflicts', function (e, payload) { cb(payload); }); },

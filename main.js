@@ -12,6 +12,7 @@ const constants = require('./shared/constants.js');
 const { DATA_VERSION, migrateData } = require('./shared/migrate.js');
 const sync = require('./shared/sync.js');
 const inboxUtil = require('./shared/inbox.js');
+const Permissions = require('./shared/permissions.js');
 const nodemailer = require('nodemailer');
 const { buildDailyDigest, shouldSendDailyEmail } = require('./shared/digest.js');
 const LunarUtil = require('./shared/lunar.js');
@@ -42,7 +43,15 @@ let lastCrashAt = 0;    // 上次渲染进程崩溃时间（10s 内不重复重�
 let tray = null;        // 系统托盘
 let isQuitting = false; // 真正退出中（关闭窗口不再拦截为最小化）
 let trayHintShown = false; // 首次最小化到托盘的提示只弹一次
-let syncState = { serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0 }; // 同步配置与游标
+// 同步配置与游标。
+// 多账号管理（v2.3.5）起还保存当前登录账号的 userId/role/permissions：
+// 渲染层据此决定「是否显示用户管理入口」「隐藏哪些无权限的功能模块」。
+// 权限一律以服务端为准（登录与 /api/auth/me 都会回传），本地只做展示层过滤 ——
+// 真正的拦截在服务端，客户端隐藏只是体验层面的事。
+let syncState = {
+  serverUrl: '', token: '', lastPulledAt: 0, lastPushedAt: 0,
+  userId: null, role: 'user', permissions: null, displayName: '',
+};
 let emailSecret = { password: '' }; // SMTP 授权码/密码（仅内存 + 加密落盘）
 let emailSending = false; // 发送中防重入（避免 30s 轮询期间重复发送）
 let aiSecret = { apiKey: '' }; // AI API key（仅内存 + 加密落盘）
@@ -362,6 +371,36 @@ function syncStatePath() { return path.join(app.getPath('userData'), SYNC_STATE_
 
 function syncAuthed() { return !!(syncState.serverUrl && syncState.token); }
 
+// 清掉登录态（保留 serverUrl，便于重新登录时预填）。角色/权限一并清空，
+// 否则退出登录后界面还会残留「用户管理」入口。
+function clearSyncAuth() {
+  syncState.token = '';
+  syncState.userId = null;
+  syncState.role = 'user';
+  syncState.permissions = null;
+  syncState.displayName = '';
+  syncState.lastPulledAt = 0;
+  syncState.lastPushedAt = 0;
+  persistSyncState();
+}
+
+// 记录当前登录账号（服务端回传的权威信息）
+function setSyncUser(user) {
+  if (!user) return;
+  syncState.userId = user.id != null ? user.id : null;
+  syncState.role = Permissions.normalizeRole(user.role);
+  // permissions 为数组时按设置来；未设置（null/''）解析为「全部功能」
+  syncState.permissions = Permissions.resolvePermissions(
+    user.permissions != null ? user.permissions : user.permissionsRaw
+  );
+  syncState.displayName = user.displayName || '';
+}
+
+// 当前账号是否管理员（未登录时按普通用户处理）
+function syncIsAdmin() {
+  return Permissions.isAdmin({ role: syncState.role });
+}
+
 // 归一化同步服务器地址（复用 shared 单一实现，与手机端容错保持一致）
 function normalizeServerUrl(raw) {
   return Utils.normalizeServerUrl(raw);
@@ -374,6 +413,12 @@ function persistSyncState() {
       serverUrl: syncState.serverUrl,
       lastPulledAt: syncState.lastPulledAt,
       lastPushedAt: syncState.lastPushedAt,
+      // 角色/权限作为「离线缓存」落盘，便于启动瞬间就能正确渲染导航；
+      // 但每次登录与 /api/auth/me 都会用服务端的权威值覆盖它。
+      userId: syncState.userId,
+      role: syncState.role,
+      permissions: syncState.permissions,
+      displayName: syncState.displayName,
       tokenEncrypted: '',
     };
     if (syncState.token) {
@@ -397,6 +442,11 @@ function loadSyncState() {
     syncState.serverUrl = s.serverUrl || '';
     syncState.lastPulledAt = s.lastPulledAt || 0;
     syncState.lastPushedAt = s.lastPushedAt || 0;
+    syncState.userId = s.userId != null ? s.userId : null;
+    syncState.role = Permissions.normalizeRole(s.role);
+    // 只有确实存过权限才覆盖；老版本的状态文件没这个字段，保持 null（= 全部功能）
+    syncState.permissions = s.permissions === undefined ? null : s.permissions;
+    syncState.displayName = s.displayName || '';
     if (s.tokenEncrypted) {
       if (s.tokenEncrypted.startsWith('plain:')) {
         syncState.token = Buffer.from(s.tokenEncrypted.slice(6), 'base64').toString('utf-8');
@@ -668,11 +718,13 @@ async function syncRequest(method, path, body) {
   if (res.status === 401) {
     // token 失效（常见于「改了服务器地址，指向另一台服务器」或服务端重置）
     // 清掉本地登录态，让界面回到登录表单，而不是反复抛 HTTP 401 让用户无从下手
-    syncState.token = '';
-    syncState.lastPulledAt = 0;
-    syncState.lastPushedAt = 0;
-    persistSyncState();
+    clearSyncAuth();
     throw new Error('登录已失效，请在设置中重新登录（服务器：' + syncState.serverUrl + '）');
+  }
+  if (res.status === 403) {
+    // 管理员停用了这个账号（或被取消了权限）。明确告知，不要伪装成网络错误。
+    clearSyncAuth();
+    throw new Error(json.error || '账号已被停用，请联系管理员');
   }
   if (!res.ok) throw new Error(json.error || ('HTTP ' + res.status));
   return json;
@@ -1090,6 +1142,7 @@ function registerIpc() {
     const path = opts.register ? '/api/auth/register' : '/api/auth/login';
     const json = await syncRequest('POST', path, { username: opts.username, password: opts.password });
     syncState.token = json.token;
+    setSyncUser(json.user);
     syncState.lastPulledAt = 0; // 登录后下次同步从全量开始
     syncState.lastPushedAt = 0;
     persistSyncState();
@@ -1099,6 +1152,55 @@ function registerIpc() {
   ipcMain.handle('sync:pull', function () { return syncPull(); });
   ipcMain.handle('sync:push', function () { return syncPush(); });
   ipcMain.handle('sync:now', function () { return syncNow(); });
+
+  // 刷新当前账号资料（角色/权限）。管理员改了某人的权限后，该用户点「刷新」即可生效，
+  // 无需退出重登 —— 服务端本来也是每次请求回库校验的，这里只是把结果同步到界面。
+  ipcMain.handle('sync:me', async function () {
+    if (!syncAuthed()) throw new Error('未登录');
+    const json = await syncRequest('GET', '/api/auth/me');
+    setSyncUser(json.user);
+    persistSyncState();
+    return { user: json.user, role: syncState.role, permissions: syncState.permissions };
+  });
+
+  // ---------- 管理员接口（仅 role=admin 可用；服务端还会再校验一次）----------
+  // 客户端这层的 isAdmin 判断只是「早点给出友好提示」，不是安全边界。
+  function requireAdminLocal() {
+    if (!syncAuthed()) throw new Error('请先登录同步账号');
+    if (!syncIsAdmin()) throw new Error('需要管理员权限');
+  }
+
+  ipcMain.handle('admin:overview', async function () {
+    requireAdminLocal();
+    return syncRequest('GET', '/api/admin/overview');
+  });
+
+  ipcMain.handle('admin:list-users', async function () {
+    requireAdminLocal();
+    return syncRequest('GET', '/api/admin/users');
+  });
+
+  ipcMain.handle('admin:create-user', async function (e, payload) {
+    requireAdminLocal();
+    return syncRequest('POST', '/api/admin/users', payload || {});
+  });
+
+  ipcMain.handle('admin:update-user', async function (e, id, patch) {
+    requireAdminLocal();
+    // 对象被改回管理员（提升自己/他人）会改变权限判定，刷新一次本地缓存
+    const json = await syncRequest('PATCH', '/api/admin/users/' + encodeURIComponent(id), patch || {});
+    if (syncState.userId != null && Number(id) === Number(syncState.userId)) {
+      setSyncUser(json.user);
+      persistSyncState();
+    }
+    return json;
+  });
+
+  ipcMain.handle('admin:delete-user', async function (e, id) {
+    requireAdminLocal();
+    // 服务端要求显式确认（删除会连带清掉该用户的同步记录，不可逆）
+    return syncRequest('DELETE', '/api/admin/users/' + encodeURIComponent(id) + '?confirm=true');
+  });
 
   // 修改同步服务器地址（保留登录态，无需退出重登）
   ipcMain.handle('sync:set-server', function (e, serverUrl) {
@@ -1119,14 +1221,20 @@ function registerIpc() {
       loggedIn: !!syncState.token,
       lastPulledAt: syncState.lastPulledAt,
       lastPushedAt: syncState.lastPushedAt,
+      // 多账号：渲染层据此决定是否显示「用户管理」、隐藏哪些无权限的功能模块。
+      // 未登录时按普通用户 + 全部功能处理（纯本地使用不该被权限限制）。
+      userId: syncState.userId,
+      username: syncState.displayName || '',
+      role: syncState.token ? Permissions.normalizeRole(syncState.role) : Permissions.ROLE.USER,
+      isAdmin: syncState.token ? syncIsAdmin() : false,
+      permissions: Permissions.resolvePermissions(syncState.permissions),
     };
   });
 
   ipcMain.handle('sync:logout', function () {
     // 保留 serverUrl：退出登录后重新登录时表单可预填，无需再手输 IP
     // （曾经整块重置导致用户每次换网络/重登都要重新回忆地址）
-    syncState = { serverUrl: syncState.serverUrl, token: '', lastPulledAt: 0, lastPushedAt: 0 };
-    persistSyncState();
+    clearSyncAuth();
     return true;
   });
 

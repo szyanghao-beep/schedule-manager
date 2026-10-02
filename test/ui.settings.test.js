@@ -69,8 +69,20 @@ test('设置页 · 已登录时渲染 立即同步/修改地址/退出登录，�
     '应显示「已登录服务器：…」，实际：' + JSON.stringify(h.texts('.item-meta', card))
   );
 
-  // 操作按钮（顺序即 DOM 顺序：地址编辑区两个 + 主操作三个）
-  assert.deepStrictEqual(h.texts('button', card), ['保存地址', '取消', '立即同步', '修改地址', '退出登录']);
+  // 操作按钮（顺序即 DOM 顺序：账号信息区的「刷新我的权限」+ 地址编辑区两个 + 主操作三个）
+  assert.deepStrictEqual(
+    h.texts('button', card),
+    ['刷新我的权限', '保存地址', '取消', '立即同步', '修改地址', '退出登录'],
+    '实际：' + JSON.stringify(h.texts('button', card))
+  );
+
+  // 多账号：已登录时应显示当前账号与角色（普通用户不带「打开用户管理」）
+  assert.ok(
+    h.texts('.item-meta', card).some(function (s) { return s.indexOf('当前账号：') === 0; }),
+    '应显示当前账号与角色，实际：' + JSON.stringify(h.texts('.item-meta', card))
+  );
+  assert.strictEqual(h.texts('button', card).indexOf('打开用户管理'), -1,
+    '非管理员不应出现「打开用户管理」');
 
   // 「修改地址」默认收起，且地址输入框必须真的在文档里（曾出现只创建未挂载的 bug）
   const ipInput = h.qs('input', card);

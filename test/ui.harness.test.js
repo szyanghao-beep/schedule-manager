@@ -70,7 +70,11 @@ test('宿主 · window.API 已被打桩：不依赖 Electron 也能跑通全部�
   assert.strictEqual(h.window.api, h.api, 'preload 的 window.api 应被替换成桩');
 
   const asyncMethods = Object.keys(h.API).filter(function (k) { return k !== 'constants'; });
+  const rejections = [];
   for (const name of asyncMethods) {
+    // 若某个方法在 api.js 里漏了透传（即 window.API.x 为 undefined），
+    // 这里会同步抛 TypeError —— 那正是 v2.3.3「设置页整页渲染中断」的形态，
+    // 所以这一步必须是「直接调用并断言返回 Promise」，不能包 try/catch 糊过去。
     const ret = h.API[name](function () {});
     if (name === 'onReminder' || name === 'onReminderAction' || name === 'onQuickCapture' ||
         name === 'onSyncDataUpdated' || name === 'onSyncConflict') {
@@ -79,7 +83,20 @@ test('宿主 · window.API 已被打桩：不依赖 Electron 也能跑通全部�
     }
     // 注意：返回值是 jsdom realm 的 Promise，不能用 instanceof 判断
     assert.strictEqual(typeof ret.then, 'function', name + ' 应返回 Promise');
+    // **必须接住 rejection**：管理员接口在「当前账号不是管理员」时按设计就是 reject，
+    // 不接住会变成 unhandledRejection，被 node:test 误判成用例失败。
+    await ret.then(function () {}, function (e) {
+      rejections.push({ name: name, message: (e && e.message) || '' });
+    });
   }
+  // 失败的必须是「有明确原因的主动拒绝」（如「需要管理员权限」），
+  // 而不是 undefined 之类的模糊错误 —— 后者说明方法根本没接上。
+  const vague = rejections.filter(function (r) {
+    return !r.message || /is not a function|Cannot read|undefined/i.test(r.message);
+  });
+  assert.deepStrictEqual(vague, [],
+    '这些方法的失败原因不明确（疑似没接到真实实现）：' + JSON.stringify(vague));
+
   await flush();
   // 事件类订阅的桩回调可以手动触发
   let fired = null;

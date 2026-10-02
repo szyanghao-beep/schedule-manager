@@ -28,9 +28,16 @@ window.API = {
   syncNow: function () { return window.api.syncNow(); },
   syncStatus: function () { return window.api.syncStatus(); },
   syncSetServer: function (serverUrl) { return window.api.syncSetServer(serverUrl); },
+  syncMe: function () { return window.api.syncMe(); },
   syncLogout: function () { return window.api.syncLogout(); },
   onSyncDataUpdated: function (cb) { window.api.onSyncDataUpdated(cb); },
   onSyncConflict: function (cb) { window.api.onSyncConflict(cb); },
+  // 多账号管理（管理员专属接口；普通用户调用会收到「需要管理员权限」）
+  adminOverview: function () { return window.api.adminOverview(); },
+  adminListUsers: function () { return window.api.adminListUsers(); },
+  adminCreateUser: function (payload) { return window.api.adminCreateUser(payload); },
+  adminUpdateUser: function (id, patch) { return window.api.adminUpdateUser(id, patch); },
+  adminDeleteUser: function (id) { return window.api.adminDeleteUser(id); },
   // 内嵌同步服务器（本机作为同步中心）
   syncServerStatus: function () { return window.api.syncServerStatus(); },
   syncServerStart: function () { return window.api.syncServerStart(); },

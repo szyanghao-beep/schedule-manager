@@ -244,6 +244,113 @@ async function main() {
     out.link.todoNoLongerShowsScheduled =
       document.getElementById('view-todo').textContent.indexOf('已排到日程') < 0;
 
+    // 8) 新手引导与功能提示（用户需求：第一次使用有指引、老用户可跳过）
+    out.guide = {};
+    // 本轮冒烟用隔离的 userData，localStorage 也是全新的 → 首次启动应该自动弹引导
+    out.guide.onboardingShown = !!document.querySelector('#modal-root .modal');
+    out.guide.onboardingTitle = (document.querySelector('#modal-root .modal-title') || {}).textContent || '';
+    const guideBtnTexts = Array.prototype.map.call(
+      document.querySelectorAll('#modal-root .modal-body button'), function (b) { return b.textContent.trim(); });
+    out.guide.hasSkip = guideBtnTexts.indexOf('跳过引导') >= 0;
+    out.guide.hasNext = guideBtnTexts.indexOf('下一步') >= 0;
+
+    // 点「跳过引导」→ 关闭并记住（老用户不该反复被打扰）
+    const skipBtn = Array.prototype.find.call(
+      document.querySelectorAll('#modal-root .modal-body button'), function (b) { return b.textContent.trim() === '跳过引导'; });
+    if (skipBtn) skipBtn.click();
+    out.guide.closedAfterSkip = !document.querySelector('#modal-root .modal');
+    try {
+      const raw = window.localStorage.getItem('schedule.guide.v1');
+      out.guide.persisted = !!(raw && JSON.parse(raw).doneVersion >= 1);
+    } catch (e) { out.guide.persisted = false; }
+
+    // 跳过之后进入功能 → 出现「这是做什么的」提示卡
+    window.App.switchView('todo');
+    const tipEl = document.querySelector('#guide-root .guide-tip');
+    out.guide.tipShown = !!tipEl;
+    out.guide.tipTitle = (document.querySelector('#guide-root .guide-tip-title') || {}).textContent || '';
+    out.guide.tipBadge = (document.querySelector('#guide-root .guide-tip-badge') || {}).textContent || '';
+    out.guide.tipExplains = !!tipEl && tipEl.textContent.indexOf('四象限') >= 0;
+
+    // 「不再提示」→ 卡片消失并记住；切到别的功能仍会提示
+    const neverBtn = Array.prototype.find.call(
+      document.querySelectorAll('#guide-root button'), function (b) { return b.textContent.trim() === '不再提示'; });
+    if (neverBtn) neverBtn.click();
+    out.guide.tipClosedByNever = !document.querySelector('#guide-root .guide-tip');
+    try {
+      const raw2 = window.localStorage.getItem('schedule.guide.v1');
+      out.guide.neverPersisted = !!(raw2 && JSON.parse(raw2).dismissedTips && JSON.parse(raw2).dismissedTips.todo);
+    } catch (e) { out.guide.neverPersisted = false; }
+    window.App.switchView('stats');
+    out.guide.otherViewStillTips = (document.querySelector('#guide-root .guide-tip-title') || {}).textContent === '统计';
+    // 切回已关闭的功能 → 不该残留上一个功能的卡（错位）
+    window.App.switchView('todo');
+    out.guide.noStaleTipOnDismissedView = !document.querySelector('#guide-root .guide-tip');
+    window.Guide.closeTip();
+
+    // 9) 权限：未登录时不做限制；管理员登录后出现「用户管理」入口
+    out.access = {};
+    out.access.adminHiddenWhenLoggedOut = !!document.querySelector('.nav-item-admin').hidden;
+    // 注意：这里要排除「用户管理」——它不是功能模块，未登录时本就该隐藏。
+    // 「不做权限限制」指的是各功能模块全部可见，纯本地使用不受影响。
+    out.access.allModulesVisibleWhenLoggedOut = Array.prototype.every.call(
+      document.querySelectorAll('.nav-item:not(.nav-item-admin)'), function (b) { return !b.hidden; });
+
+    const savedSyncStatus = window.API.syncStatus;
+    const savedAdminList = window.API.adminListUsers;
+    window.API.syncStatus = function () {
+      return Promise.resolve({
+        serverUrl: 'http://192.168.0.106:8787', loggedIn: true, lastPulledAt: 0, lastPushedAt: 0,
+        userId: 1, username: '管理员甲', role: 'admin', isAdmin: true,
+        permissions: ['schedule', 'todo', 'customer', 'plan', 'inbox', 'review', 'memorials', 'bookkeeping', 'search', 'stats'],
+      });
+    };
+    window.API.adminListUsers = function () {
+      return Promise.resolve({
+        users: [
+          { id: 1, username: 'admin1', displayName: '管理员甲', role: 'admin', status: 'active',
+            permissions: ['todo'], createdAt: Date.now() - 86400000, lastLoginAt: Date.now(), recordCount: 36, isSelf: true },
+          { id: 2, username: 'bob', displayName: '', role: 'user', status: 'disabled',
+            permissions: ['todo', 'stats'], createdAt: Date.now(), lastLoginAt: 0, recordCount: 4, isSelf: false },
+        ],
+        me: 1,
+      });
+    };
+    await window.App.refreshAccess();
+    out.access.adminVisibleForAdmin = !document.querySelector('.nav-item-admin').hidden;
+    window.App.switchView('admin');
+    window.Modules.admin.render();
+    await new Promise(function (r) { setTimeout(r, 300); });
+    const aEl = document.getElementById('view-admin');
+    out.access.adminRendered = aEl.textContent.indexOf('用户管理') >= 0;
+    out.access.adminShowsUsers = aEl.textContent.indexOf('admin1') >= 0 && aEl.textContent.indexOf('bob') >= 0;
+    out.access.adminStats = Array.prototype.map.call(
+      aEl.querySelectorAll('.stat-value'), function (n) { return n.textContent.trim(); });
+    out.access.selfProtected = Array.prototype.some.call(
+      aEl.querySelectorAll('button'), function (b) { return b.textContent.trim() === '停用账号' && b.disabled; });
+    out.access.canEnableDisabled = Array.prototype.some.call(
+      aEl.querySelectorAll('button'), function (b) { return b.textContent.trim() === '启用账号'; });
+
+    // 普通用户：管理员入口隐藏，且无权限的模块导航也隐藏
+    window.API.syncStatus = function () {
+      return Promise.resolve({
+        serverUrl: 'http://192.168.0.106:8787', loggedIn: true, lastPulledAt: 0, lastPushedAt: 0,
+        userId: 2, username: 'bob', role: 'user', isAdmin: false, permissions: ['todo', 'stats'],
+      });
+    };
+    await window.App.refreshAccess();
+    out.access.adminHiddenForUser = !!document.querySelector('.nav-item-admin').hidden;
+    out.access.visibleViewsForUser = Array.prototype.filter.call(
+      document.querySelectorAll('.nav-item'), function (b) { return !b.hidden; })
+      .map(function (b) { return b.dataset.view; });
+    window.App.switchView('admin');
+    out.access.userCannotOpenAdmin = window.App.getView() !== 'admin';
+
+    // 还原，避免影响后续检查
+    window.API.syncStatus = savedSyncStatus;
+    window.API.adminListUsers = savedAdminList;
+    await window.App.refreshAccess();
+
     return out;
   })()`);
 
@@ -316,6 +423,36 @@ async function main() {
     lk.eventStatusBefore + ' -> ' + lk.eventStatusAfter);
   check('★ 日程被删后待办的悬空关联被清理', lk.danglingLinkCleared === true);
   check('悬空清理后待办不再显示「已排到日程」', lk.todoNoLongerShowsScheduled === true);
+
+  console.log('== 新手引导与功能提示（用户需求：首次指引 / 老用户可跳过）==');
+  const gd = result.guide || {};
+  check('首次启动自动弹出引导', gd.onboardingShown === true && gd.onboardingTitle.indexOf('欢迎') >= 0,
+    gd.onboardingTitle);
+  check('引导可跳过（老用户不被反复打扰）', gd.hasSkip === true);
+  check('引导有「下一步」可逐步看', gd.hasNext === true);
+  check('★ 点「跳过引导」后关闭且状态被记住', gd.closedAfterSkip === true && gd.persisted === true);
+  check('★ 跳过之后进入功能会弹「这是做什么的」提示卡',
+    gd.tipShown === true && gd.tipBadge === '这是做什么的', gd.tipBadge);
+  check('提示卡内容确实在解释该功能', gd.tipExplains === true);
+  check('「不再提示」关闭该功能的提示并记住', gd.tipClosedByNever === true && gd.neverPersisted === true);
+  check('其他功能仍会提示', gd.otherViewStillTips === true);
+  check('切回已关闭的功能时不残留上一个功能的提示卡', gd.noStaleTipOnDismissedView === true);
+
+  console.log('== 多账号：管理员与普通用户的界面分离 ==');
+  const ac = result.access || {};
+  check('未登录时隐藏「用户管理」入口', ac.adminHiddenWhenLoggedOut === true);
+  check('未登录时各功能模块不受限制（纯本地使用不受影响）', ac.allModulesVisibleWhenLoggedOut === true);
+  check('★ 管理员登录后出现「用户管理」入口', ac.adminVisibleForAdmin === true);
+  check('用户管理页渲染账号列表', ac.adminRendered === true && ac.adminShowsUsers === true);
+  check('统计数字正确（2 账号 / 1 管理员）',
+    JSON.stringify(ac.adminStats) === JSON.stringify(['2', '1', '1', '40']), JSON.stringify(ac.adminStats));
+  check('★ 不能停用当前登录账号（按钮禁用）', ac.selfProtected === true);
+  check('已停用账号显示「启用账号」', ac.canEnableDisabled === true);
+  check('★ 普通用户看不到「用户管理」入口', ac.adminHiddenForUser === true);
+  check('★ 普通用户只能看到授权的功能模块',
+    JSON.stringify(ac.visibleViewsForUser) === JSON.stringify(['todo', 'stats', 'settings']),
+    JSON.stringify(ac.visibleViewsForUser));
+  check('普通用户切不进用户管理', ac.userCannotOpenAdmin === true);
 
   console.log('== 渲染层控制台错误 ==');
   check('无渲染层错误日志', rendererErrors.length === 0, rendererErrors.slice(0, 3).join(' | '));
