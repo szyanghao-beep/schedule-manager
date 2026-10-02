@@ -23,11 +23,18 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  var ROLE = { ADMIN: 'admin', USER: 'user' };
-  var ROLE_LABEL = { admin: '管理员', user: '普通用户' };
+  var ROLE = { SUPER: 'super', ADMIN: 'admin', USER: 'user' };
+  var ROLE_LABEL = { super: '超级管理员', admin: '管理员', user: '普通用户' };
 
   var STATUS = { ACTIVE: 'active', DISABLED: 'disabled' };
   var STATUS_LABEL = { active: '启用', disabled: '已停用' };
+
+  // 内置的超级管理员：账号固定，密码可由环境变量 SUPER_ADMIN_PASSWORD 覆盖。
+  // ⚠️ 默认密码是弱口令。本仓库是公开仓库，默认值等于公开的凭据 ——
+  //    部署后请立刻在「用户管理 → 改密码」里改掉，或设置 SUPER_ADMIN_PASSWORD。
+  //    服务端启动时与后台概览接口都会带出「是否仍在使用默认密码」以供告警。
+  var SUPER_ADMIN_USERNAME = 'admin';
+  var DEFAULT_SUPER_ADMIN_PASSWORD = '123456';
 
   // 可授权的功能模块（与渲染层的视图 key 一一对应）
   var MODULES = [
@@ -56,6 +63,7 @@
   }
 
   function normalizeRole(role) {
+    if (role === ROLE.SUPER) return ROLE.SUPER;
     return role === ROLE.ADMIN ? ROLE.ADMIN : ROLE.USER;
   }
 
@@ -63,8 +71,20 @@
     return status === STATUS.DISABLED ? STATUS.DISABLED : STATUS.ACTIVE;
   }
 
+  // 超级管理员也属于「管理员」（能进用户管理），所以这里的判断必须包含 super
   function isAdmin(user) {
-    return !!user && normalizeRole(user.role) === ROLE.ADMIN;
+    if (!user) return false;
+    var r = normalizeRole(user.role);
+    return r === ROLE.ADMIN || r === ROLE.SUPER;
+  }
+
+  function isSuper(user) {
+    return !!user && normalizeRole(user.role) === ROLE.SUPER;
+  }
+
+  // 内置超级管理员的账号名（固定，不参与权限勾选）
+  function isSuperUsername(username) {
+    return String(username == null ? '' : username).trim() === SUPER_ADMIN_USERNAME;
   }
 
   function isActive(user) {
@@ -108,9 +128,11 @@
   }
 
   // 该权限集合能否访问某模块
-  function canAccess(rawPermissions, moduleKey) {
+  // 超级管理员不受权限勾选限制（否则把自己锁住就没法进后台改回来了）
+  function canAccess(rawPermissions, moduleKey, role) {
     if (!moduleKey) return true;
     if (ALWAYS_ALLOWED.indexOf(moduleKey) >= 0) return true;
+    if (role != null && normalizeRole(role) === ROLE.SUPER) return true;
     return resolvePermissions(rawPermissions).indexOf(moduleKey) >= 0;
   }
 
@@ -131,6 +153,8 @@
     ROLE_LABEL: ROLE_LABEL,
     STATUS: STATUS,
     STATUS_LABEL: STATUS_LABEL,
+    SUPER_ADMIN_USERNAME: SUPER_ADMIN_USERNAME,
+    DEFAULT_SUPER_ADMIN_PASSWORD: DEFAULT_SUPER_ADMIN_PASSWORD,
     MODULES: MODULES,
     ALL_MODULE_KEYS: ALL_MODULE_KEYS,
     ALWAYS_ALLOWED: ALWAYS_ALLOWED,
@@ -138,6 +162,8 @@
     normalizeRole: normalizeRole,
     normalizeStatus: normalizeStatus,
     isAdmin: isAdmin,
+    isSuper: isSuper,
+    isSuperUsername: isSuperUsername,
     isActive: isActive,
     defaultPermissions: defaultPermissions,
     sanitizePermissions: sanitizePermissions,

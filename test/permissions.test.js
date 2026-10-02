@@ -103,3 +103,42 @@ test('MODULES 与渲染层视图一一对应（新增功能模块时必须同步
     '可授权的功能模块必须与导航项一致，实际导航：' + navViews.join(', ')
   );
 });
+
+// ---------------- 内置超级管理员（admin，最高权限） ----------------
+
+test('超级管理员：角色高于管理员，且同属「能进用户管理」的角色', function () {
+  assert.strictEqual(P.normalizeRole('super'), 'super');
+  assert.strictEqual(P.ROLE_LABEL.super, '超级管理员');
+
+  // 关键：isAdmin 必须把 super 也算进去，否则超级管理员反而看不到用户管理入口
+  assert.strictEqual(P.isAdmin({ role: 'super' }), true, 'super 必须也被视为管理员');
+  assert.strictEqual(P.isAdmin({ role: 'admin' }), true);
+  assert.strictEqual(P.isAdmin({ role: 'user' }), false);
+
+  assert.strictEqual(P.isSuper({ role: 'super' }), true);
+  assert.strictEqual(P.isSuper({ role: 'admin' }), false, '普通管理员不是超级管理员');
+  assert.strictEqual(P.isSuper({ role: 'user' }), false);
+  assert.strictEqual(P.isSuper(null), false);
+});
+
+test('超级管理员不受功能权限限制（被误设成「无权限」也照样能用）', function () {
+  assert.strictEqual(P.canAccess([], 'bookkeeping', 'super'), true);
+  assert.strictEqual(P.canAccess('[]', 'customer', 'super'), true);
+  assert.strictEqual(P.canAccess([], 'bookkeeping', 'admin'), false, '普通管理员仍受限');
+  // 不传 role 时行为不变（向后兼容既有调用）
+  assert.strictEqual(P.canAccess([], 'bookkeeping'), false);
+});
+
+test('内置超级管理员账号名固定为 admin，可据此做保护判定', function () {
+  assert.strictEqual(P.SUPER_ADMIN_USERNAME, 'admin');
+  assert.strictEqual(P.isSuperUsername('admin'), true);
+  assert.strictEqual(P.isSuperUsername(' admin '), true, '应容忍首尾空白');
+  assert.strictEqual(P.isSuperUsername('admin2'), false);
+  assert.strictEqual(P.isSuperUsername(''), false);
+  assert.strictEqual(P.isSuperUsername(null), false);
+});
+
+test('默认超级管理员密码满足长度要求，但属于弱口令（用于告警判定）', function () {
+  assert.strictEqual(P.DEFAULT_SUPER_ADMIN_PASSWORD, '123456');
+  assert.ok(P.DEFAULT_SUPER_ADMIN_PASSWORD.length >= 6, '至少要满足服务端的密码长度校验');
+});

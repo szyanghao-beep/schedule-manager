@@ -682,3 +682,6 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 
 /* 管理员入口做一点视觉区分 */
 .nav-item-admin { color: var(--primary); }
+
+/* 安全告警卡片（内置超级管理员仍在使用默认密码时显示） */
+.danger-card { border-left: 3px solid var(--danger); }

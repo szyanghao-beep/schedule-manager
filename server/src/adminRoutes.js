@@ -17,16 +17,19 @@
 const bcrypt = require('bcryptjs');
 const P = require('../../shared/permissions.js');
 const { publicUser } = require('./auth.js');
+const { superAdminUsesDefaultPassword } = require('./db.js');
 
 function nowMs() { return Date.now(); }
 
 function adminCount(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM users WHERE role = ?').get(P.ROLE.ADMIN).n;
+  // 超级管理员也算管理员
+  return db.prepare('SELECT COUNT(*) AS n FROM users WHERE role IN (?, ?)')
+    .get(P.ROLE.ADMIN, P.ROLE.SUPER).n;
 }
 
 function activeAdminCount(db) {
-  return db.prepare('SELECT COUNT(*) AS n FROM users WHERE role = ? AND status = ?')
-    .get(P.ROLE.ADMIN, P.STATUS.ACTIVE).n;
+  return db.prepare('SELECT COUNT(*) AS n FROM users WHERE role IN (?, ?) AND status = ?')
+    .get(P.ROLE.ADMIN, P.ROLE.SUPER, P.STATUS.ACTIVE).n;
 }
 
 function getUserRow(db, id) {
@@ -45,12 +48,21 @@ function registerAdminRoutes(app, db, authenticate, requireAdmin) {
     const total = db.prepare('SELECT COUNT(*) AS n FROM users').get().n;
     const active = db.prepare('SELECT COUNT(*) AS n FROM users WHERE status = ?').get(P.STATUS.ACTIVE).n;
     const records = db.prepare('SELECT COUNT(*) AS n FROM records').get().n;
+    const superRow = db.prepare('SELECT id, username, status FROM users WHERE username = ?')
+      .get(P.SUPER_ADMIN_USERNAME);
     res.json({
       totalUsers: total,
       activeUsers: active,
       disabledUsers: total - active,
       adminUsers: adminCount(db),
       totalRecords: records,
+      // 内置超级管理员信息 + 是否仍在用默认弱口令（管理页据此显示醒目告警）
+      superAdmin: {
+        exists: !!superRow,
+        username: P.SUPER_ADMIN_USERNAME,
+        status: superRow ? P.normalizeStatus(superRow.status) : null,
+        usingDefaultPassword: superAdminUsesDefaultPassword(db),
+      },
     });
   });
 
@@ -103,6 +115,29 @@ function registerAdminRoutes(app, db, authenticate, requireAdmin) {
     if (!row) return res.status(404).json({ error: '用户不存在' });
     const body = req.body || {};
     const self = id === req.user.id;
+    const targetIsSuper = P.isSuperUsername(row.username) || P.normalizeRole(row.role) === P.ROLE.SUPER;
+
+    // ---- 内置超级管理员的保护 ----
+    // 谁都不能停用/降级/删除它（包括它自己按错），否则就只能去服务器上改数据库才救得回来。
+    // 唯一允许的改动是「改密码」——那是改掉默认弱口令的正规途径。
+    if (targetIsSuper) {
+      if (body.role != null && P.normalizeRole(body.role) !== P.ROLE.SUPER) {
+        return res.status(400).json({ error: '不能修改内置超级管理员的角色' });
+      }
+      if (body.status != null && P.normalizeStatus(body.status) !== P.STATUS.ACTIVE) {
+        return res.status(400).json({ error: '不能停用内置超级管理员' });
+      }
+      if (!self) {
+        // 其他管理员只能改它的密码之外什么都不能改；改密码也交给它自己更稳妥
+        const onlyPassword = Object.keys(body).every(function (k) { return k === 'password'; });
+        if (!onlyPassword || body.password != null) {
+          return res.status(403).json({ error: '内置超级管理员只能由该账号本人修改' });
+        }
+      }
+      if (body.permissions != null) {
+        return res.status(400).json({ error: '超级管理员不受功能权限限制，无需设置' });
+      }
+    }
 
     const nextRole = body.role != null ? P.normalizeRole(body.role) : P.normalizeRole(row.role);
     const nextStatus = body.status != null ? P.normalizeStatus(body.status) : P.normalizeStatus(row.status);
@@ -112,12 +147,13 @@ function registerAdminRoutes(app, db, authenticate, requireAdmin) {
       return res.status(400).json({ error: '不能停用当前登录的账号' });
     }
     // 规则 2：不能把自己降级 —— 同上
-    if (self && nextRole !== P.ROLE.ADMIN && P.normalizeRole(row.role) === P.ROLE.ADMIN) {
+    if (self && nextRole !== P.ROLE.ADMIN && nextRole !== P.ROLE.SUPER &&
+        P.isAdmin({ role: row.role })) {
       return res.status(400).json({ error: '不能取消自己的管理员角色' });
     }
     // 规则 2（续）：不能动掉最后一个可用管理员
-    const wasActiveAdmin = P.normalizeRole(row.role) === P.ROLE.ADMIN && P.normalizeStatus(row.status) === P.STATUS.ACTIVE;
-    const willBeActiveAdmin = nextRole === P.ROLE.ADMIN && nextStatus === P.STATUS.ACTIVE;
+    const wasActiveAdmin = P.isAdmin({ role: row.role }) && P.normalizeStatus(row.status) === P.STATUS.ACTIVE;
+    const willBeActiveAdmin = P.isAdmin({ role: nextRole }) && nextStatus === P.STATUS.ACTIVE;
     if (wasActiveAdmin && !willBeActiveAdmin && activeAdminCount(db) <= 1) {
       return res.status(400).json({ error: '系统必须保留至少一个启用状态的管理员' });
     }
@@ -152,11 +188,14 @@ function registerAdminRoutes(app, db, authenticate, requireAdmin) {
     const row = getUserRow(db, id);
     if (!row) return res.status(404).json({ error: '用户不存在' });
     if (id === req.user.id) return res.status(400).json({ error: '不能删除当前登录的账号' });
+    // 内置超级管理员不可删除：删了就只能去服务器改数据库，且默认凭据会失效
+    if (P.isSuperUsername(row.username) || P.normalizeRole(row.role) === P.ROLE.SUPER) {
+      return res.status(400).json({ error: '内置超级管理员不可删除' });
+    }
     if (String(req.query.confirm || '') !== 'true') {
       return res.status(400).json({ error: '删除不可逆，需显式确认' });
     }
-    const isAdminRow = P.normalizeRole(row.role) === P.ROLE.ADMIN;
-    if (isAdminRow && adminCount(db) <= 1) {
+    if (P.isAdmin({ role: row.role }) && adminCount(db) <= 1) {
       return res.status(400).json({ error: '系统必须保留至少一个管理员' });
     }
 

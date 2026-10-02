@@ -81,8 +81,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         // 版本号与桌面端发布版本保持一致（test/mobile.contract.test.js 会校验，
         // 防止两端漂移）。此前长期停在 1/1.0，用户装上去看不出版本、也收不到更新提示。
-        versionCode 3
-        versionName "2.3.5"
+        versionCode 4
+        versionName "2.3.6"
     }
     signingConfigs {
         debug {

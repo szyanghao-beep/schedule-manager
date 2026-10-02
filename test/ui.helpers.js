@@ -144,8 +144,12 @@ function normalizeServerUrl(u) {
 }
 
 function createApiStub(overrides) {
-  // 管理员判定的唯一来源：角色。不要依赖 state.sync.isAdmin（见下方注释）
-  const isAdminNow = function () { return state.sync.role === 'admin'; };
+  // 管理员判定的唯一来源：角色。不要依赖 state.sync.isAdmin（见下方注释）。
+  // 必须与 shared/permissions.js 的 isAdmin 一致 —— super 也算管理员，
+  // 否则超级管理员在测试里会拿不到管理接口（真实代码里 isAdmin 已包含 super）。
+  const isAdminNow = function () {
+    return state.sync.role === 'admin' || state.sync.role === 'super';
+  };
   const state = {
     email: emailStatusFrom(null, null),
     ai: aiStatusFrom(null, null),
@@ -156,7 +160,7 @@ function createApiStub(overrides) {
       role: 'user', isAdmin: false, permissions: null, displayName: '',
     },
     // 管理员接口的假数据：users 可由用例直接替换
-    admin: { users: [], modules: null, failWith: null },
+    admin: { users: [], modules: null, failWith: null, superAdmin: null },
   };
 
   // 默认实现（返回值会被 Promise.resolve 包装，模拟 ipcRenderer.invoke）
@@ -190,10 +194,12 @@ function createApiStub(overrides) {
     syncPull: function () { return { pulled: 0, pushed: 0 }; },
     syncPush: function () { return { pushed: 0, pulled: 0 }; },
     syncNow: function () { return { pushed: 0, pulled: 0 }; },
-    // isAdmin 由 role 推导，避免用例里两处状态要同步设置
+    // isAdmin 由 role 推导，避免用例里两处状态要同步设置。
+    // 必须与 shared/permissions.js 的 isAdmin 一致：super 也算管理员。
     syncStatus: function () {
       const s = Object.assign({}, state.sync);
-      s.isAdmin = s.role === 'admin';
+      s.isAdmin = isAdminNow();
+      s.isSuper = s.role === 'super';
       return s;
     },
     syncSetServer: function (serverUrl) {
@@ -217,8 +223,12 @@ function createApiStub(overrides) {
         totalUsers: users.length,
         activeUsers: users.filter(function (u) { return u.status === 'active'; }).length,
         disabledUsers: users.filter(function (u) { return u.status !== 'active'; }).length,
-        adminUsers: users.filter(function (u) { return u.role === 'admin'; }).length,
+        adminUsers: users.filter(function (u) { return u.role === 'admin' || u.role === 'super'; }).length,
         totalRecords: users.reduce(function (n, u) { return n + (u.recordCount || 0); }, 0),
+        // 内置超级管理员信息（含「是否仍在用默认密码」的安全告警开关）
+        superAdmin: state.admin.superAdmin || {
+          exists: false, username: 'admin', status: null, usingDefaultPassword: false,
+        },
       };
     },
     adminListUsers: function () {

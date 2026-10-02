@@ -308,12 +308,20 @@ async function main() {
     window.API.adminListUsers = function () {
       return Promise.resolve({
         users: [
+          { id: 9, username: 'admin', displayName: '超级管理员', role: 'super', status: 'active',
+            permissions: [], createdAt: Date.now() - 3 * 86400000, lastLoginAt: Date.now(), recordCount: 0, isSelf: false },
           { id: 1, username: 'admin1', displayName: '管理员甲', role: 'admin', status: 'active',
             permissions: ['todo'], createdAt: Date.now() - 86400000, lastLoginAt: Date.now(), recordCount: 36, isSelf: true },
           { id: 2, username: 'bob', displayName: '', role: 'user', status: 'disabled',
             permissions: ['todo', 'stats'], createdAt: Date.now(), lastLoginAt: 0, recordCount: 4, isSelf: false },
         ],
         me: 1,
+      });
+    };
+    window.API.adminOverview = function () {
+      return Promise.resolve({
+        totalUsers: 3, activeUsers: 2, disabledUsers: 1, adminUsers: 2, totalRecords: 40,
+        superAdmin: { exists: true, username: 'admin', status: 'active', usingDefaultPassword: true },
       });
     };
     await window.App.refreshAccess();
@@ -330,6 +338,23 @@ async function main() {
       aEl.querySelectorAll('button'), function (b) { return b.textContent.trim() === '停用账号' && b.disabled; });
     out.access.canEnableDisabled = Array.prototype.some.call(
       aEl.querySelectorAll('button'), function (b) { return b.textContent.trim() === '启用账号'; });
+
+    // 内置超级管理员：徽标 + 危险操作全部禁用 + 默认密码安全告警
+    out.access.superBadgeShown = aEl.textContent.indexOf('超级管理员') >= 0;
+    out.access.defaultPasswordWarning = aEl.textContent.indexOf('安全提醒') >= 0;
+    out.access.warningMentionsEnv = aEl.textContent.indexOf('SUPER_ADMIN_PASSWORD') >= 0;
+    const superRow = Array.prototype.find.call(aEl.querySelectorAll('.card'), function (c) {
+      // 注意：安全告警卡片里也含「超级管理员」字样，所以要按「有操作按钮的账号行」来定位
+      return c.querySelector('button') && Array.prototype.some.call(c.querySelectorAll('.badge'), function (b) {
+        return b.textContent.trim() === '超级管理员';
+      });
+    });
+    out.access.superRowProtected = !!superRow && ['停用账号', '取消管理员', '删除', '设置权限'].every(function (label) {
+      const btn = Array.prototype.find.call(superRow.querySelectorAll('button'), function (b) {
+        return b.textContent.trim() === label;
+      });
+      return !!btn && btn.disabled === true;
+    });
 
     // 普通用户：管理员入口隐藏，且无权限的模块导航也隐藏
     window.API.syncStatus = function () {
@@ -444,10 +469,13 @@ async function main() {
   check('未登录时各功能模块不受限制（纯本地使用不受影响）', ac.allModulesVisibleWhenLoggedOut === true);
   check('★ 管理员登录后出现「用户管理」入口', ac.adminVisibleForAdmin === true);
   check('用户管理页渲染账号列表', ac.adminRendered === true && ac.adminShowsUsers === true);
-  check('统计数字正确（2 账号 / 1 管理员）',
-    JSON.stringify(ac.adminStats) === JSON.stringify(['2', '1', '1', '40']), JSON.stringify(ac.adminStats));
+  check('统计数字正确（3 账号 / 2 启用 / 2 管理员 含超管）',
+    JSON.stringify(ac.adminStats) === JSON.stringify(['3', '2', '2', '40']), JSON.stringify(ac.adminStats));
   check('★ 不能停用当前登录账号（按钮禁用）', ac.selfProtected === true);
   check('已停用账号显示「启用账号」', ac.canEnableDisabled === true);
+  check('★ 内置超级管理员显示「超级管理员」徽标', ac.superBadgeShown === true);
+  check('★ 超级管理员的停用/降级/删除/权限按钮全部禁用', ac.superRowProtected === true);
+  check('★ 仍用默认密码时显示安全告警', ac.defaultPasswordWarning === true && ac.warningMentionsEnv === true);
   check('★ 普通用户看不到「用户管理」入口', ac.adminHiddenForUser === true);
   check('★ 普通用户只能看到授权的功能模块',
     JSON.stringify(ac.visibleViewsForUser) === JSON.stringify(['todo', 'stats', 'settings']),

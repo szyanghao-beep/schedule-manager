@@ -48,11 +48,15 @@ function rateLimit(windowMs, max) {
 // 账号行 -> 对外安全形状（绝不含密码哈希）
 function publicUser(row) {
   if (!row) return null;
+  const role = P.normalizeRole(row.role);
   return {
     id: row.id,
     username: row.username,
     displayName: row.display_name || '',
-    role: P.normalizeRole(row.role),
+    role: role,
+    // 超级管理员也算管理员（能进用户管理），所以这里用 isAdmin 而不是 role === 'admin'
+    isAdmin: P.isAdmin({ role: role }),
+    isSuper: P.isSuper({ role: role }),
     status: P.normalizeStatus(row.status),
     // 注意：'' 表示未设置 → 解析为全部模块；客户端据此决定显示哪些功能
     permissions: P.resolvePermissions(row.permissions),

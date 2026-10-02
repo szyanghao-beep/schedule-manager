@@ -26,6 +26,7 @@ window.Modules.admin = (function () {
     modules: P.MODULES,
     meId: null,
     status: null, // syncStatus() 结果
+    overview: null, // /api/admin/overview（含超级管理员与默认密码告警）
   };
   // 正在编辑权限的账号 id（展开权限勾选面板）
   let editingPermId = null;
@@ -91,13 +92,43 @@ window.Modules.admin = (function () {
     }
 
     root.appendChild(overviewCards());
+    root.appendChild(defaultPasswordWarning());
     root.appendChild(userTable());
+  }
+
+  // 内置超级管理员仍在用默认弱口令时给出醒目告警。
+  // 这条不是「唠叨」：本仓库是公开仓库，默认凭据等于公开的；同步服务又在局域网上，
+  // 同网段任何人凭它就能拿到最高权限、读写或删除所有人的数据。
+  function defaultPasswordWarning() {
+    const sup = state.overview && state.overview.superAdmin;
+    if (!sup || !sup.usingDefaultPassword) return el('span');
+    const box = el('div', 'card danger-card');
+    box.style.marginTop = '12px';
+    box.appendChild(el('div', 'panel-title', '⚠ 安全提醒：内置超级管理员仍在使用默认密码'));
+
+    const p1 = el('div', 'item-meta',
+      '内置超级管理员「' + sup.username + '」的密码还是默认值。这个默认值是公开的，' +
+      '而同步服务监听在局域网上 —— 同一网络里任何人都能凭它取得最高权限，' +
+      '读取、修改或删除所有账号的数据。');
+    p1.style.marginTop = '6px';
+    p1.style.color = 'var(--danger)';
+    box.appendChild(p1);
+
+    const p2 = el('div', 'item-meta',
+      '建议立刻用「' + sup.username + '」登录后在下方改密码；' +
+      '或在服务端设置环境变量 SUPER_ADMIN_PASSWORD 后重启，' +
+      '需要把改过的密码重置回该值时设 SUPER_ADMIN_RESET=1 重启一次。');
+    p2.style.marginTop = '6px';
+    box.appendChild(p2);
+
+    return box;
   }
 
   function overviewCards() {
     const users = state.users;
     const active = users.filter(function (u) { return u.status === 'active'; }).length;
-    const admins = users.filter(function (u) { return u.role === 'admin'; }).length;
+    // 「管理员」要含超级管理员 —— 只看 role==='admin' 会漏掉它，与顶部的角色徽标自相矛盾
+    const admins = users.filter(function (u) { return P.isAdmin(u); }).length;
     const records = users.reduce(function (n, u) { return n + (u.recordCount || 0); }, 0);
     const cards = el('div', 'stat-cards');
     [
@@ -134,7 +165,7 @@ window.Modules.admin = (function () {
       titleRow.style.gap = '8px';
       titleRow.appendChild(el('div', 'item-title', u.username + (u.displayName ? '（' + u.displayName + '）' : '')));
       const roleBadge = el('span', 'badge', P.ROLE_LABEL[u.role] || u.role);
-      roleBadge.style.background = u.role === 'admin' ? '#4f8ef7' : '#8a8f98';
+      roleBadge.style.background = u.role === 'super' ? '#8e6fd8' : (u.role === 'admin' ? '#4f8ef7' : '#8a8f98');
       roleBadge.style.color = '#fff';
       titleRow.appendChild(roleBadge);
       const stBadge = el('span', 'badge', P.STATUS_LABEL[u.status] || u.status);
@@ -156,24 +187,34 @@ window.Modules.admin = (function () {
       left.appendChild(meta);
 
       const permLine = el('div', 'item-meta');
-      permLine.textContent = '功能权限：' + P.permissionSummary(u.permissions);
+      // 超级管理员不受权限勾选限制，别显示「无功能权限」误导人
+      const isSuperRow = P.isSuper(u) || P.isSuperUsername(u.username);
+      permLine.textContent = '功能权限：' + (isSuperRow ? '全部功能（超级管理员不受限制）' : P.permissionSummary(u.permissions));
       permLine.style.marginTop = '4px';
-      permLine.style.color = u.permissions.length ? 'var(--muted)' : 'var(--danger)';
+      permLine.style.color = (!isSuperRow && !P.resolvePermissions(u.permissions).length)
+        ? 'var(--danger)' : 'var(--muted)';
       left.appendChild(permLine);
 
       head.appendChild(left);
 
       const isSelf = !!u.isSelf;
+      // 内置超级管理员：谁都不能停用/降级/删除它（服务端也会拒绝，这里提前禁用）。
+      // 判定同时看 role 与固定用户名 —— 名字固定为 admin，改不了。
+      const targetIsSuper = P.isSuper(u) || P.isSuperUsername(u.username);
       const activeAdminCount = state.users.filter(function (x) {
-        return x.role === 'admin' && x.status === 'active';
+        return P.isAdmin(x) && x.status === 'active';
       }).length;
       // 与后端同规则：不能停用/降级/删除自己；不能动掉最后一个启用的管理员
-      const isLastActiveAdmin = u.role === 'admin' && u.status === 'active' && activeAdminCount <= 1;
+      const isLastActiveAdmin = P.isAdmin(u) && u.status === 'active' && activeAdminCount <= 1;
 
       const actions = el('div', 'cal-nav');
       actions.style.flexWrap = 'wrap';
 
       const permBtn = el('button', 'btn btn-sm', editingPermId === u.id ? '收起权限' : '设置权限');
+      if (targetIsSuper) {
+        permBtn.disabled = true;
+        permBtn.title = '超级管理员不受功能权限限制，无需设置';
+      }
       permBtn.addEventListener('click', function () {
         editingPermId = (editingPermId === u.id) ? null : u.id;
         render();
@@ -181,7 +222,10 @@ window.Modules.admin = (function () {
       actions.appendChild(permBtn);
 
       const toggleBtn = el('button', 'btn btn-sm', u.status === 'active' ? '停用账号' : '启用账号');
-      if (isSelf) {
+      if (targetIsSuper) {
+        toggleBtn.disabled = true;
+        toggleBtn.title = '内置超级管理员不可停用（停掉就没人能进后台了）';
+      } else if (isSelf) {
         toggleBtn.disabled = true;
         toggleBtn.title = '不能停用当前登录的账号';
       } else if (isLastActiveAdmin && u.status === 'active') {
@@ -194,27 +238,38 @@ window.Modules.admin = (function () {
       });
       actions.appendChild(toggleBtn);
 
+      // 超级管理员的密码只能由它本人改 —— 这是改掉默认弱口令的正规途径，必须留着
       const pwBtn = el('button', 'btn btn-sm', '重置密码');
+      if (targetIsSuper && !isSelf) {
+        pwBtn.disabled = true;
+        pwBtn.title = '内置超级管理员的密码只能由该账号本人修改';
+      }
       pwBtn.addEventListener('click', function () { openPasswordForm(u); });
       actions.appendChild(pwBtn);
 
-      const roleBtn = el('button', 'btn btn-sm', u.role === 'admin' ? '取消管理员' : '设为管理员');
-      if (isSelf) {
+      const roleBtn = el('button', 'btn btn-sm', P.isAdmin(u) ? '取消管理员' : '设为管理员');
+      if (targetIsSuper) {
+        roleBtn.disabled = true;
+        roleBtn.title = '不能修改内置超级管理员的角色';
+      } else if (isSelf) {
         roleBtn.disabled = true;
         roleBtn.title = '不能取消自己的管理员角色';
-      } else if (isLastActiveAdmin && u.role === 'admin') {
+      } else if (isLastActiveAdmin) {
         roleBtn.disabled = true;
         roleBtn.title = '系统必须保留至少一个启用的管理员';
       }
       roleBtn.addEventListener('click', function () {
-        const nextRole = u.role === 'admin' ? 'user' : 'admin';
+        const nextRole = P.isAdmin(u) ? 'user' : 'admin';
         patchUser(u, { role: nextRole },
           nextRole === 'admin' ? '已把「' + u.username + '」设为管理员' : '已取消「' + u.username + '」的管理员角色');
       });
       actions.appendChild(roleBtn);
 
       const delBtn = el('button', 'btn btn-sm btn-danger', '删除');
-      if (isSelf) {
+      if (targetIsSuper) {
+        delBtn.disabled = true;
+        delBtn.title = '内置超级管理员不可删除';
+      } else if (isSelf) {
         delBtn.disabled = true;
         delBtn.title = '不能删除当前登录的账号';
       } else if (isLastActiveAdmin) {
@@ -420,6 +475,10 @@ window.Modules.admin = (function () {
         state.users = (res && res.users) || [];
         if (res && Array.isArray(res.modules) && res.modules.length) state.modules = res.modules;
         state.meId = res && res.me;
+        // 概览里带「超级管理员是否仍在用默认密码」，用于顶部安全告警
+        return window.API.adminOverview().then(function (ov) {
+          state.overview = ov || null;
+        }).catch(function () { state.overview = null; });
       });
     }).catch(function (e) {
       state.error = (e && e.message) ? e.message : String(e);

@@ -280,8 +280,115 @@ test('用户管理 · 加载失败时显示错误并可重试（不假装成功�
     '重试后应显示真实数据：' + JSON.stringify(h.texts('.stat-value', h.view('admin'))));
 });
 
-test('设置页 · 管理员可见「打开用户管理」，普通用户不可见', async function (t) {
-  const hA = await setupAs();
+// ---------------- 内置超级管理员（admin，最高权限）----------------
+
+function superUsers() {
+  return [
+    {
+      id: 1, username: 'admin', displayName: '超级管理员', role: 'super', status: 'active',
+      permissions: P.ALL_MODULE_KEYS.slice(), createdAt: FIXED_NOW - 30 * DAY,
+      lastLoginAt: FIXED_NOW, recordCount: 0, isSelf: false,
+    },
+    {
+      id: 2, username: 'admin1', displayName: '管理员甲', role: 'admin', status: 'active',
+      permissions: [], createdAt: FIXED_NOW - 10 * DAY,
+      lastLoginAt: FIXED_NOW, recordCount: 12, isSelf: true,
+    },
+  ];
+}
+
+test('★ 超级管理员那一行：谁都不能停用/降级/删除它（含它自己）', async function (t) {
+  // 视角一：普通管理员在看
+  const h = await setupAs();
+  t.after(function () { h.close(); });
+  const root = await openAdmin(h, superUsers());
+  const superCard = cardOf(h, root, 'admin');
+  assert.ok(superCard, '应能找到内置超级管理员那一行');
+  assert.ok(h.texts('.badge', superCard).indexOf('超级管理员') >= 0,
+    '应有「超级管理员」角色徽标：' + JSON.stringify(h.texts('.badge', superCard)));
+
+  ['停用账号', '取消管理员', '删除', '设置权限'].forEach(function (label) {
+    const btn = h.allByText('button', label, superCard)[0];
+    assert.ok(btn, '超级管理员行应有「' + label + '」按钮');
+    assert.strictEqual(btn.disabled, true, '「' + label + '」对超级管理员必须禁用');
+    assert.ok(btn.title, '禁用时要说明原因');
+  });
+  // 但「重置密码」对普通管理员要禁用（只能本人改）
+  assert.strictEqual(h.allByText('button', '重置密码', superCard)[0].disabled, true,
+    '普通管理员不能改超级管理员的密码');
+
+  // 超级管理员的权限行不应该显示成「无功能权限」（它根本不受权限限制）
+  assert.ok(h.texts('.item-meta', superCard).some(function (s) {
+    return s.indexOf('超级管理员不受限制') >= 0;
+  }), JSON.stringify(h.texts('.item-meta', superCard)));
+});
+
+test('★ 超级管理员自己登录时，也能改自己的密码（改掉默认弱口令的正规途径）', async function (t) {
+  const users = superUsers();
+  users[0].isSelf = true;
+  users[1].isSelf = false;
+  const h = await setupAs({ role: 'super' });
+  t.after(function () { h.close(); });
+  const root = await openAdmin(h, users);
+  const superCard = cardOf(h, root, 'admin');
+
+  assert.strictEqual(h.allByText('button', '停用账号', superCard)[0].disabled, true,
+    '连自己也不能停用超级管理员');
+  assert.strictEqual(h.allByText('button', '重置密码', superCard)[0].disabled, false,
+    '本人应能改自己的密码');
+
+  h.clickText('button', '重置密码', superCard);
+  assert.strictEqual(h.text('#modal-root .modal-title'), '重置密码');
+  h.qs('#modal-root input[type=password]').value = 'strongpass999';
+  h.clickText('button', '保存', h.qs('#modal-root .modal-footer'));
+  await flush();
+  const args = h.api.__lastArgs('adminUpdateUser');
+  assert.strictEqual(args[0], 1, '应对超级管理员(id=1)生效');
+  assert.deepStrictEqual(args[1], { password: 'strongpass999' });
+});
+
+test('★ 超级管理员仍用默认密码时，管理页给出醒目安全告警', async function (t) {
+  const h = await setupAs();
+  t.after(function () { h.close(); });
+
+  h.api.__state.admin.users = superUsers();
+  h.api.__state.admin.superAdmin = {
+    exists: true, username: 'admin', status: 'active', usingDefaultPassword: true,
+  };
+  h.renderView('admin');
+  await flush();
+  let root = h.view('admin');
+  assert.ok(root.textContent.indexOf('安全提醒') >= 0,
+    '应显示安全告警：' + root.textContent.slice(0, 200));
+  assert.ok(root.textContent.indexOf('同一网络') >= 0, '应说明风险（同网段任何人可用）');
+  assert.ok(root.textContent.indexOf('SUPER_ADMIN_PASSWORD') >= 0, '应给出可操作的处置方式');
+  assert.ok(h.qs('.danger-card', root), '告警应有醒目的样式类');
+
+  // 改掉默认密码后告警消失
+  const h2 = await setupAs();
+  t.after(function () { h2.close(); });
+  h2.api.__state.admin.users = superUsers();
+  h2.api.__state.admin.superAdmin = {
+    exists: true, username: 'admin', status: 'active', usingDefaultPassword: false,
+  };
+  h2.renderView('admin');
+  await flush();
+  const root2 = h2.view('admin');
+  assert.strictEqual(root2.textContent.indexOf('安全提醒'), -1, '改掉默认密码后不该再告警');
+  assert.strictEqual(h2.qs('.danger-card', root2), null);
+});
+
+test('超级管理员也是管理员：能看到用户管理入口', async function (t) {
+  const h = await setupAs({ role: 'super' });
+  t.after(function () { h.close(); });
+  assert.strictEqual(h.qs('.nav-item-admin').hidden, false,
+    '超级管理员必须能看到「用户管理」（isAdmin 要把 super 算进去）');
+  h.renderView('settings');
+  await flush();
+  assert.ok(h.texts('button').indexOf('打开用户管理') >= 0);
+});
+
+test('设置页 · 管理员可见「打开用户管理」，普通用户不可见', async function (t) {  const hA = await setupAs();
   t.after(function () { hA.close(); });
   hA.renderView('settings');
   await flush();
