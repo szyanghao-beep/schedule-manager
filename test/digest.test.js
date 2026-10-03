@@ -3,7 +3,11 @@
  */
 const test = require('node:test');
 const assert = require('node:assert');
-const { buildDailyDigest, parseEmailTime, shouldSendDailyEmail } = require('../shared/digest.js');
+const {
+  buildDailyDigest, parseEmailTime, shouldSendDailyEmail,
+  dailyEmailGaveUp, EMAIL_MAX_ATTEMPTS_PER_DAY,
+} = require('../shared/digest.js');
+const Utils = require('../shared/utils.js');
 
 // 固定「今天」为 2026-08-22（周六）12:00
 const NOW = new Date('2026-08-22T12:00:00').getTime();
@@ -150,4 +154,75 @@ test('触发判定：发送中 → 防重入不发送', function () {
 test('触发判定：未到点不发送，恰好到点发送', function () {
   assert.strictEqual(shouldSendDailyEmail(baseOpts({ time: '09:00' })), false); // 现在 08:30
   assert.strictEqual(shouldSendDailyEmail(baseOpts({ time: '08:30' })), true);  // 边界：恰好到点
+});
+
+// ---------------- 每日邮件的失败退避（防止每 30 秒重撞 SMTP） ----------------
+// 背景：检查周期是 30 秒；失败后若不记录状态，下一轮又满足「到点且当日未发」，
+// 就会整天每 30 秒重试一次（约 2880 次），既刷日志也可能被邮箱服务商锁定账号。
+
+function baseEmailOpts(now) {
+  return {
+    enabled: true, to: 'me@example.com', host: 'smtp.example.com', user: 'me@example.com',
+    hasPassword: true, time: '08:00', now: now,
+  };
+}
+
+test('shouldSendDailyEmail：到点且当日未发 → 发送', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  assert.strictEqual(shouldSendDailyEmail(baseEmailOpts(now)), true);
+});
+
+test('shouldSendDailyEmail：失败后在退避期内不再重试（关键：否则每 30 秒撞一次）', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  const MIN = 60000;
+  const failed = Object.assign(baseEmailOpts(now), {
+    failCount: 1, failDate: '2026-03-10', lastAttemptAt: now - 1 * MIN,
+  });
+  assert.strictEqual(shouldSendDailyEmail(failed), false, '刚失败 1 分钟不应重试');
+
+  const later = Object.assign({}, failed, { lastAttemptAt: now - 6 * MIN });
+  assert.strictEqual(shouldSendDailyEmail(later), true, '超过退避间隔后可以重试');
+});
+
+test('shouldSendDailyEmail：退避间隔随失败次数拉长', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  const MIN = 60000;
+  // 第 2 次失败后要等 15 分钟
+  const f2 = Object.assign(baseEmailOpts(now), {
+    failCount: 2, failDate: '2026-03-10', lastAttemptAt: now - 10 * MIN,
+  });
+  assert.strictEqual(shouldSendDailyEmail(f2), false, '10 分钟仍在 15 分钟退避内');
+  assert.strictEqual(shouldSendDailyEmail(Object.assign({}, f2, { lastAttemptAt: now - 16 * MIN })), true);
+});
+
+test('shouldSendDailyEmail：当天尝试次数用尽后不再重试，跨天自动重置', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  const used = Object.assign(baseEmailOpts(now), {
+    failCount: EMAIL_MAX_ATTEMPTS_PER_DAY, failDate: '2026-03-10', lastAttemptAt: now - 999 * 60000,
+  });
+  assert.strictEqual(shouldSendDailyEmail(used), false, '当天已用尽次数');
+
+  const nextDay = Object.assign(baseEmailOpts(Utils.parseDateTime('2026-03-11', '09:00')), {
+    failCount: EMAIL_MAX_ATTEMPTS_PER_DAY, failDate: '2026-03-10', lastAttemptAt: now,
+  });
+  assert.strictEqual(shouldSendDailyEmail(nextDay), true, '换了一天就该重新尝试');
+});
+
+test('dailyEmailGaveUp：只在「当天的尝试次数用尽」时为真', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  assert.strictEqual(dailyEmailGaveUp({ now: now, failCount: EMAIL_MAX_ATTEMPTS_PER_DAY, failDate: '2026-03-10' }), true);
+  assert.strictEqual(dailyEmailGaveUp({ now: now, failCount: 1, failDate: '2026-03-10' }), false);
+  assert.strictEqual(dailyEmailGaveUp({ now: now, failCount: EMAIL_MAX_ATTEMPTS_PER_DAY, failDate: '2026-03-09' }), false,
+    '昨天的计数不应影响今天');
+  assert.strictEqual(dailyEmailGaveUp(null), false);
+});
+
+test('不传失败信息时行为与以前完全一致（向后兼容）', function () {
+  const now = Utils.parseDateTime('2026-03-10', '09:00');
+  assert.strictEqual(shouldSendDailyEmail(baseEmailOpts(now)), true);
+  assert.strictEqual(shouldSendDailyEmail(Object.assign(baseEmailOpts(now), { lastSentDate: '2026-03-10' })), false);
+  assert.strictEqual(shouldSendDailyEmail(Object.assign(baseEmailOpts(now), { sending: true })), false);
+  assert.strictEqual(shouldSendDailyEmail(Object.assign(baseEmailOpts(now), { enabled: false })), false);
+  assert.strictEqual(shouldSendDailyEmail(Object.assign(baseEmailOpts(now), { hasPassword: false })), false);
+  assert.strictEqual(shouldSendDailyEmail(Object.assign(baseEmailOpts(now), { time: '99:99' })), false);
 });

@@ -18,6 +18,8 @@ contextBridge.exposeInMainWorld('api', {
   emailSaveSettings: function (opts) { return ipcRenderer.invoke('email:save-settings', opts); },
   emailTest: function (opts) { return ipcRenderer.invoke('email:test', opts); },
   emailStatus: function () { return ipcRenderer.invoke('email:status'); },
+  // 每日邮件当天放弃重试时通知界面（此前失败只在控制台，打包后用户看不到）
+  onEmailReminderFailed: function (cb) { ipcRenderer.on('email-reminder-failed', function (e, payload) { cb(payload); }); },
   aiSaveSettings: function (opts) { return ipcRenderer.invoke('ai:save-settings', opts); },
   aiTest: function () { return ipcRenderer.invoke('ai:test'); },
   aiStatus: function () { return ipcRenderer.invoke('ai:status'); },

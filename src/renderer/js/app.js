@@ -114,6 +114,11 @@ window.App = (function () {
       Toast.warning('有 ' + conflicts.length + ' 条记录被其他设备更新：' + names + more);
     });
 
+    // 每日邮件当天放弃重试 -> 让用户知道「邮件为什么没来」（此前只有控制台日志）
+    API.onEmailReminderFailed(function (payload) {
+      Toast.error((payload && payload.message) || '每日邮件发送失败，请到设置中检查邮件配置');
+    });
+
     // 导航切换
     document.querySelectorAll('.nav-item').forEach(function (btn) {
       btn.addEventListener('click', function () { switchView(btn.dataset.view); });

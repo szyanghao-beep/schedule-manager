@@ -267,7 +267,7 @@ function createApiStub(overrides) {
   };
 
   // 事件订阅类：只记录回调，供 __emit 触发
-  const listeners = ['onReminder', 'onReminderAction', 'onQuickCapture', 'onSyncDataUpdated', 'onSyncConflict'];
+  const listeners = ['onReminder', 'onReminderAction', 'onQuickCapture', 'onSyncDataUpdated', 'onSyncConflict', 'onEmailReminderFailed'];
 
   const stub = { constants: CONSTANTS };
   const calls = {};

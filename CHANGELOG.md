@@ -11,17 +11,17 @@
 | 结构 | 主进程 `main.js` + `preload.js`（项目根目录）；渲染层 `src/renderer/` |
 | 数据持久化 | `userData/data.json`，防抖保存 500ms，自动备份（最多 10 份） |
 | 仓库 | https://github.com/szyanghao-beep/schedule-manager.git（分支 `main`） |
-| 当前版本 | **v2.3.6** |
+| 当前版本 | **v2.3.7** |
 
 ---
 
-## 测试基线（v2.3.6）
+## 测试基线（v2.3.7）
 
 | 层 | 命令 | 结果 |
 |----|------|------|
-| 纯函数单测 + 跨文件契约 | `npm test` | **366 通过 / 0 失败**（v2.3.5 为 358） |
-| 渲染层 UI（jsdom） | `npm run test:ui` | **74 通过 / 0 失败**（v2.3.5 为 70） |
-| 真实 Electron 冒烟 | `npm run smoke` | **67 通过 / 0 失败**（v2.3.5 为 64） |
+| 纯函数单测 + 跨文件契约 | `npm test` | **372 通过 / 0 失败**（v2.3.6 为 366） |
+| 渲染层 UI（jsdom） | `npm run test:ui` | **74 通过 / 0 失败** |
+| 真实 Electron 冒烟 | `npm run smoke` | **67 通过 / 0 失败** |
 | 打包内容验收 | `npm run verify:asar` | **66 通过 / 0 失败** |
 | 打包产物启动验收 | `npm run verify:packaged` | **5 通过 / 0 失败** |
 | **多账号管理** | `node server/verify-admin.js` | **74 通过 / 0 失败** |
@@ -30,6 +30,43 @@
 ---
 
 ## 版本历史
+
+### v2.3.7 — 修复每日邮件的「重试风暴」与「失败无声」
+
+**怎么发现的**：把 v2.3.6 跑起来给你看时，控制台里出现两次
+`每日邮件发送失败 Error: Invalid login: 535 authentication failed`。
+
+**两个真实问题**：
+
+1. **失败后每 30 秒重试一次，一整天**。
+   检查周期是 `setInterval(checkEmailReminder, 30000)`（`REMINDER_INTERVAL`），
+   而 `shouldSendDailyEmail` 只判断「到点 + 当天没发成功」，**失败不写任何状态**，
+   于是下一轮又满足条件、再试一次。凭据持续错误时会一整天约重试 **2880 次** ——
+   既刷爆日志，也可能被邮箱服务商判定异常而**锁定账号**。
+2. **失败只有 `console.error`**。打包后的桌面程序没有控制台，
+   用户只会发现「每日邮件一直没来」，完全不知道是授权码过期、主机填错还是别的。
+
+**修复**：
+
+1. `shared/digest.js` 的 `shouldSendDailyEmail` 增加**失败退避**：
+   第 1 次失败后等 5 分钟、第 2 次 15 分钟、第 3 次 60 分钟；
+   一天最多尝试 4 次（含首次），用尽则当天不再重试，**跨天自动清零**。
+   新增 `dailyEmailGaveUp()` 供「今天已放弃」的判断。不传失败字段时行为与以前完全一致。
+2. 失败信息**落库**（`settings.emailReminder.failCount/failDate/lastAttemptAt/lastError/lastErrorAt`），
+   并通过 `emailStatus` 暴露给界面。
+3. **设置 → 邮件提醒** 顶部直接显示「最近一次发送失败（时间，当天已尝试 N 次）：原因」。
+4. 当天放弃时**系统通知 + 应用内提示**（新增 IPC 事件 `email-reminder-failed`，
+   按 preload → api.js → app.js 的既有模式接通），不再无声无息。
+
+**测试**：新增 6 项退避用例（退避期内不重试、间隔随次数拉长、当天用尽后停止、
+跨天重置、`dailyEmailGaveUp` 语义、不传失败字段时的向后兼容）。
+另外把 jsdom 宿主里「哪些方法是订阅类」的判断从硬编码名单改为
+**从桩的订阅登记表推导**，以后再加订阅方法不会再误报。
+
+> 说明：本次你机器上的那两次 535 是瞬时失败，之后有一次发送成功
+> （`emailLastSentDate` 已是当天），所以邮箱配置本身可用。
+> 这次修的是「持续失败」时的行为与可见性。
+
 
 ### v2.3.6 — 内置超级管理员（最高权限）
 

@@ -14,6 +14,7 @@ window.API = {
   emailSaveSettings: function (opts) { return window.api.emailSaveSettings(opts); },
   emailTest: function (opts) { return window.api.emailTest(opts); },
   emailStatus: function () { return window.api.emailStatus(); },
+  onEmailReminderFailed: function (cb) { window.api.onEmailReminderFailed(cb); },
   aiSaveSettings: function (opts) { return window.api.aiSaveSettings(opts); },
   aiTest: function () { return window.api.aiTest(); },
   aiStatus: function () { return window.api.aiStatus(); },

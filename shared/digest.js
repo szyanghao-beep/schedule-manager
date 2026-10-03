@@ -155,8 +155,18 @@ function parseEmailTime(str) {
   return hh * 60 + mm;
 }
 
+// 失败后的重试退避（毫秒）：第 1 次失败后等 5 分钟，第 2 次 15 分钟，第 3 次 60 分钟。
+// 为什么需要：检查周期是 30 秒。若失败后不记录任何状态、下一轮又满足「到点且当日未发」，
+// 就会**每 30 秒撞一次 SMTP**（一整天约 2880 次），既刷爆日志，
+// 也可能被邮箱服务商判定为异常而**锁定账号**。
+var EMAIL_RETRY_DELAYS_MS = [5 * 60000, 15 * 60000, 60 * 60000];
+// 一天的尝试上限（含首次）：超过就当天不再尝试，避免无意义的持续重试
+var EMAIL_MAX_ATTEMPTS_PER_DAY = 4;
+
 // 判断「到点且当日未发」是否应触发每日邮件。
-// opts: { enabled, to, host, user, hasPassword, time, now, lastSentDate, sending }
+// opts: { enabled, to, host, user, hasPassword, time, now, lastSentDate, sending,
+//         failCount?, failDate?, lastAttemptAt? }
+//   failCount/failDate/lastAttemptAt 用于失败退避；不传时行为与以前完全一致。
 function shouldSendDailyEmail(opts) {
   if (!opts) return false;
   if (!opts.enabled || !opts.to) return false;                    // 开关 + 收件人
@@ -164,13 +174,34 @@ function shouldSendDailyEmail(opts) {
   const minutes = parseEmailTime(opts.time);
   if (minutes == null) return false;                              // 发送时间非法
   if (opts.sending) return false;                                 // 发送中防重入
-  if (opts.lastSentDate === Utils.toDateStr(opts.now)) return false; // 当日已发去重
+  const today = Utils.toDateStr(opts.now);
+  if (opts.lastSentDate === today) return false;                  // 当日已发去重
   if (opts.now < Utils.startOfDay(opts.now) + minutes * 60000) return false; // 未到点
+
+  // ---- 失败退避（跨天后自动清零）----
+  const failDate = opts.failDate || '';
+  const failCount = failDate === today ? (Number(opts.failCount) || 0) : 0;
+  if (failCount >= EMAIL_MAX_ATTEMPTS_PER_DAY) return false;      // 今天试够次数了，明天再说
+  if (failCount > 0 && opts.lastAttemptAt) {
+    const delay = EMAIL_RETRY_DELAYS_MS[Math.min(failCount - 1, EMAIL_RETRY_DELAYS_MS.length - 1)];
+    if (opts.now - opts.lastAttemptAt < delay) return false;      // 还在退避期内
+  }
   return true;
+}
+
+// 当天是否已放弃发送（用于「今天就别指望了，去设置里看错误原因」这类提示）
+function dailyEmailGaveUp(opts) {
+  if (!opts) return false;
+  const today = Utils.toDateStr(opts.now);
+  if ((opts.failDate || '') !== today) return false;
+  return (Number(opts.failCount) || 0) >= EMAIL_MAX_ATTEMPTS_PER_DAY;
 }
 
 module.exports = {
   buildDailyDigest: buildDailyDigest,
   parseEmailTime: parseEmailTime,
   shouldSendDailyEmail: shouldSendDailyEmail,
+  dailyEmailGaveUp: dailyEmailGaveUp,
+  EMAIL_RETRY_DELAYS_MS: EMAIL_RETRY_DELAYS_MS,
+  EMAIL_MAX_ATTEMPTS_PER_DAY: EMAIL_MAX_ATTEMPTS_PER_DAY,
 };

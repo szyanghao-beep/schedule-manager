@@ -14,7 +14,7 @@ const sync = require('./shared/sync.js');
 const inboxUtil = require('./shared/inbox.js');
 const Permissions = require('./shared/permissions.js');
 const nodemailer = require('nodemailer');
-const { buildDailyDigest, shouldSendDailyEmail } = require('./shared/digest.js');
+const { buildDailyDigest, shouldSendDailyEmail, dailyEmailGaveUp } = require('./shared/digest.js');
 const LunarUtil = require('./shared/lunar.js');
 const aiIndex = require('./ai/index.js');
 const { derivePairingCode } = require('./server/src/inboxDrop.js');
@@ -544,6 +544,15 @@ function emailStatus() {
     fromName: smtp.fromName || '',
     hasPassword: !!emailSecret.password,
     lastSentDate: data.emailLastSentDate || '',
+    // 失败信息：让设置页能回答「每日邮件为什么没收到」。
+    // 此前失败只写 console.error，打包后没有控制台，用户完全看不到原因。
+    failCount: Number(er.failCount) || 0,
+    failDate: er.failDate || '',
+    lastError: er.lastError || '',
+    lastErrorAt: er.lastErrorAt || 0,
+    gaveUpToday: dailyEmailGaveUp({
+      now: Date.now(), failCount: er.failCount, failDate: er.failDate,
+    }),
   };
 }
 
@@ -586,20 +595,63 @@ function checkEmailReminder() {
     now: now,
     lastSentDate: data.emailLastSentDate,
     sending: emailSending,
+    // 失败退避：避免认证失败后每 30 秒重撞一次 SMTP（一天约 2880 次，
+    // 既刷日志也可能被服务商判定异常而锁号）
+    failCount: er && er.failCount,
+    failDate: er && er.failDate,
+    lastAttemptAt: er && er.lastAttemptAt,
   })) return;
+
   const digest = buildDailyDigest(data, now);
   const today = Utils.toDateStr(now);
   emailSending = true;
+
+  // 记一次尝试（失败信息落库，设置页能看到「为什么没收到邮件」）
+  function markAttempt(err) {
+    if (!data.settings.emailReminder) data.settings.emailReminder = {};
+    const e = data.settings.emailReminder;
+    if ((e.failDate || '') !== today) { e.failCount = 0; e.failDate = today; }
+    e.failCount = (Number(e.failCount) || 0) + 1;
+    e.lastAttemptAt = Date.now();
+    if (err) {
+      e.lastError = String((err && err.message) || err).slice(0, 300);
+      e.lastErrorAt = Date.now();
+    } else {
+      e.lastError = '';
+      e.lastErrorAt = 0;
+    }
+    scheduleSave();
+    return e;
+  }
+
   sendMail({ to: er.to, subject: digest.subject, text: digest.text, html: digest.html })
     .then(function () {
       data.emailLastSentDate = today;
-      scheduleSave();
+      markAttempt(null); // 成功后清掉失败记录
       if (Notification.isSupported()) {
         new Notification({ title: '日程管理', body: '每日待办邮件已发送' }).show();
       }
     })
     .catch(function (e) {
-      console.error('每日邮件发送失败', e);
+      const erNow = markAttempt(e);
+      console.error('每日邮件发送失败（第 ' + erNow.failCount + ' 次）', e);
+      // 当天放弃时明确告知用户 —— 否则每日邮件一直不来，而失败只在控制台（打包后没有），
+      // 用户根本无从知道原因。
+      if (dailyEmailGaveUp({
+        now: Date.now(),
+        failCount: erNow.failCount,
+        failDate: erNow.failDate,
+      })) {
+        const msg = '每日邮件今天已停止重试，请到「设置 → 邮件提醒」检查配置。原因：' +
+          String((e && e.message) || e);
+        console.error(msg);
+        if (Notification.isSupported()) {
+          new Notification({ title: '日程管理 · 每日邮件发送失败', body: msg }).show();
+        }
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('email-reminder-failed', { message: msg });
+        }
+      }
     })
     .finally(function () { emailSending = false; });
 }

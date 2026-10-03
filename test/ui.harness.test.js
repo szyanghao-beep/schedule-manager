@@ -70,14 +70,16 @@ test('宿主 · window.API 已被打桩：不依赖 Electron 也能跑通全部�
   assert.strictEqual(h.window.api, h.api, 'preload 的 window.api 应被替换成桩');
 
   const asyncMethods = Object.keys(h.API).filter(function (k) { return k !== 'constants'; });
+  // 订阅类方法（返回 undefined 而非 Promise）从桩的登记表推导，
+  // 不要在这里硬编码名字 —— 否则每加一个订阅方法都要改这行，容易漏。
+  const subscriptionNames = Object.keys(h.api.__listeners || {});
   const rejections = [];
   for (const name of asyncMethods) {
     // 若某个方法在 api.js 里漏了透传（即 window.API.x 为 undefined），
     // 这里会同步抛 TypeError —— 那正是 v2.3.3「设置页整页渲染中断」的形态，
     // 所以这一步必须是「直接调用并断言返回 Promise」，不能包 try/catch 糊过去。
     const ret = h.API[name](function () {});
-    if (name === 'onReminder' || name === 'onReminderAction' || name === 'onQuickCapture' ||
-        name === 'onSyncDataUpdated' || name === 'onSyncConflict') {
+    if (subscriptionNames.indexOf(name) >= 0) {
       assert.strictEqual(typeof ret, 'undefined', name + ' 是订阅类，应返回 undefined');
       continue;
     }

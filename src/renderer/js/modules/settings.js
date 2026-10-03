@@ -657,6 +657,19 @@ window.Modules.settings = (function () {
   function renderEmailContent(box, st) {
     window.Dom.clear(box);
 
+    // 发送失败时把原因摆出来。
+    // 背景：此前失败只写 console.error，打包后根本没有控制台 ——
+    // 用户只会发现「每日邮件一直没来」，却完全不知道是授权码过期还是主机填错。
+    if (st && st.lastError) {
+      const warn = el('div', 'item-meta');
+      warn.style.color = 'var(--danger)';
+      warn.style.marginBottom = '8px';
+      warn.textContent = '⚠ 最近一次发送失败（' + window.Utils.toDateTimeStr(st.lastErrorAt) + '，' +
+        '当天已尝试 ' + (st.failCount || 0) + ' 次）：' + st.lastError +
+        (st.gaveUpToday ? '　今天已停止重试，明天到点会再试。' : '');
+      box.appendChild(warn);
+    }
+
     const enableRow = el('div', 'form-row');
     enableRow.appendChild(el('label', null, '启用每日邮件'));
     const enableCheck = el('input');
