@@ -111,9 +111,9 @@
   <p>开启同步服务后，设置页的卡片上会直接显示：</p>
   <div class="callout ok">
     <div class="ct">手机端地址</div>
-    <code style="font-size:13pt;">http://192.168.1.100:8787</code>
+    <code style="font-size:13pt;">http://（电脑当前局域网IP）:8787</code>
   </div>
-  <p>把这段地址原样填到手机端即可（IP 是你的电脑实际 IP，示例里的 <code>192.168.1.100</code> 仅供参考）。</p>
+  <p>把这段地址原样填到手机端即可。<b>IP 会随电脑、网络变化</b>（换电脑、换路由器、重启路由器后都可能不同），所以请以程序里显示的为准；手机端也可以直接点「🔍 自动查找电脑」自动找到，不用手抄。</p>
 
   <h2>方式二：命令行查看</h2>
   <p>Windows 打开「命令提示符」输入 <code>ipconfig</code>，找到<b>「IPv4 地址」</b>；macOS 输入 <code>ifconfig</code>，找 <code>inet 192.168.x.x</code>。取其中的 IP，再拼上 <code>:8787</code>。</p>
@@ -122,7 +122,7 @@
   <table>
     <tr><th>要素</th><th>含义</th><th>示例</th></tr>
     <tr><td>http://</td><td>局域网内用普通 HTTP（内网明文即可）</td><td>—</td></tr>
-    <tr><td>IP</td><td>电脑的局域网 IPv4 地址</td><td>192.168.1.100</td></tr>
+    <tr><td>IP</td><td>电脑的局域网 IPv4 地址（<b>会随网络变化</b>，以程序显示为准）</td><td>见程序「本机同步服务」</td></tr>
     <tr><td>:8787</td><td>同步服务端口（固定）</td><td>8787</td></tr>
   </table>
 
@@ -139,7 +139,7 @@
   <h1>第 4 章　在安卓手机上连接并同步</h1>
 
   <div class="step"><div class="n">1</div><div class="c">手机安装并打开「日程管理」安卓端。</div></div>
-  <div class="step"><div class="n">2</div><div class="c">进入「设置 → 多端同步」，把<b>服务器地址</b>填成电脑的地址，例如 <code>http://192.168.1.100:8787</code>。</div></div>
+  <div class="step"><div class="n">2</div><div class="c">进入「设置 → 多端同步」，点「<b>连接本机</b>」自动填入 <code>http://127.0.0.1:8787</code>（本机自连推荐——回环地址不受网段变化影响）；若要连另一台电脑，点「填入局域网地址」或手输。</div></div>
   <div class="step"><div class="n">3</div><div class="c">填一个<b>用户名 + 密码</b>，点<b>「注册并登录」</b>（首次注册；以后直接登录）。</div></div>
   <div class="step"><div class="n">4</div><div class="c">点<b>「立即同步」</b>。之后两端每次改动会自动同步；也可随时手动点「立即同步」。</div></div>
 

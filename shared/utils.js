@@ -523,9 +523,110 @@
     return u;
   }
 
+  // ---- 局域网地址与「自己」的判定（桌面端 / 手机端 / 服务端共用） ----
+  // 背景：同步地址跟着**安装主机**走 —— 换一台电脑、换一个路由器、DHCP 重新分配，
+  // 网段和 IP 都会变。所以任何「写死」或「存下来就不管」的地址迟早失效。
+  // 这里的工具函数用来判断「这个地址是不是指向本机自己」，以及生成网段扫描候选。
+
+  function isLoopbackHost(host) {
+    var h = String(host == null ? '' : host).trim().toLowerCase();
+    return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '0.0.0.0';
+  }
+
+  // 取地址里的主机名（不含端口）。解析失败返回 ''。
+  function hostOf(raw) {
+    var u = normalizeServerUrl(raw);
+    if (!u) return '';
+    var m = /^[a-z]+:\/\/([^/?#]+)/i.exec(u);
+    if (!m) return '';
+    var hostport = m[1];
+    var at = hostport.lastIndexOf('@');
+    if (at >= 0) hostport = hostport.slice(at + 1);
+    // IPv6 形如 [::1]:8787
+    if (hostport.charAt(0) === '[') {
+      var end = hostport.indexOf(']');
+      return end > 0 ? hostport.slice(1, end) : hostport;
+    }
+    return hostport.split(':')[0];
+  }
+
+  // 这个服务器地址是否指向「本机自己」？
+  // localIps 传本机当前（或历史）的局域网 IP。
+  // 用途：本机既是同步中心又是客户端时，地址应当用回环地址 ——
+  // 回环地址永远指向本机，不受 IP / 网段 / 换主机影响。
+  function isSelfServerUrl(raw, localIps) {
+    var host = hostOf(raw);
+    if (!host) return false;
+    if (isLoopbackHost(host)) return true;
+    return (localIps || []).indexOf(host) >= 0;
+  }
+
+  // 回环地址（本机自连推荐使用）：不受网段变化影响
+  function loopbackUrl(port) {
+    return 'http://127.0.0.1:' + (Number(port) || 8787);
+  }
+
+  // '192.168.0.106' -> '192.168.0'；非法输入返回 ''
+  function subnetPrefix(ip) {
+    var s = String(ip == null ? '' : ip).trim();
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(s);
+    if (!m) return '';
+    for (var i = 1; i <= 4; i++) {
+      var n = Number(m[i]);
+      if (n < 0 || n > 255) return '';
+    }
+    return m[1] + '.' + m[2] + '.' + m[3];
+  }
+
+  // 把「完整 IP」或「三段前缀」都规整成三段前缀：'192.168.0.106' / '192.168.0' -> '192.168.0'
+  function toPrefix(input) {
+    var s = String(input == null ? '' : input).trim();
+    if (/^\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(s)) return subnetPrefix(s + '.0');
+    return subnetPrefix(s);
+  }
+
+  // 生成「自动查找电脑」的候选地址（同网段 1~254，供并行探测）。
+  // 只扫 /24 最后一段：家用/办公网几乎都是 /24，够用，也不会变成重量级的全网扫描。
+  // prefix 接受 '192.168.0' 或 '192.168.0.106' 两种写法。
+  function subnetCandidates(prefix, port, opts) {
+    var o = opts || {};
+    var start = o.start != null ? Number(o.start) : 1;
+    var end = o.end != null ? Number(o.end) : 254;
+    var exclude = o.exclude || [];
+    var p = toPrefix(prefix);
+    if (!p) return [];
+    var out = [];
+    for (var i = start; i <= end; i++) {
+      var ip = p + '.' + i;
+      if (exclude.indexOf(ip) >= 0) continue;
+      out.push('http://' + ip + ':' + (Number(port) || 8787));
+    }
+    return out;
+  }
+
+  // 按优先级排列要扫描的网段前缀：
+  //   1. 上次成功连过的地址所在网段（最可能命中）
+  //   2. 常见家用/办公网段（换网络时的兜底）
+  function scanPrefixes(lastGoodUrl, extras) {
+    var out = [];
+    function push(p) { if (p && out.indexOf(p) < 0) out.push(p); }
+    var host = hostOf(lastGoodUrl);
+    if (host && !isLoopbackHost(host)) push(toPrefix(host));
+    (extras || ['192.168.0', '192.168.1', '192.168.2', '192.168.31', '10.0.0', '10.0.1'])
+      .forEach(function (p) { push(toPrefix(p)); });
+    return out;
+  }
+
   return {
     STATUS: STATUS,
     normalizeServerUrl: normalizeServerUrl,
+    isLoopbackHost: isLoopbackHost,
+    hostOf: hostOf,
+    isSelfServerUrl: isSelfServerUrl,
+    loopbackUrl: loopbackUrl,
+    subnetPrefix: subnetPrefix,
+    subnetCandidates: subnetCandidates,
+    scanPrefixes: scanPrefixes,
     REPEAT_TYPE: REPEAT_TYPE,
     IMPORTANCE: IMPORTANCE,
     QUADRANT: QUADRANT,

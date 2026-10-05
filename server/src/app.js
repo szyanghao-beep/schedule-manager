@@ -22,7 +22,14 @@ function createApp(db, secret, options) {
   app.use(express.json({ limit: '2mb' })); // 同步 payload 无需 10mb，收紧防大请求体 DoS
 
   app.get('/health', function (req, res) {
-    res.json({ ok: true, time: Date.now() });
+    // app 字段用于让客户端（含手机端「自动查找电脑」）**确认这就是我们的服务**，
+    // 而不是某个碰巧占用 8787 的其它程序 —— 否则按网段扫描时会误判。
+    res.json({
+      ok: true,
+      app: 'schedule-manager',
+      version: (options && options.version) || '',
+      time: Date.now(),
+    });
   });
 
   registerAuthRoutes(app, db, secret);

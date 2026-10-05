@@ -48,4 +48,6 @@ contextBridge.exposeInMainWorld('api', {
   syncServerStatus: function () { return ipcRenderer.invoke('sync-server:status'); },
   syncServerStart: function () { return ipcRenderer.invoke('sync-server:start'); },
   syncServerStop: function () { return ipcRenderer.invoke('sync-server:stop'); },
+  // 本机局域网地址变化（换网络/换主机后网段变了）→ 提示用户更新其它设备上填的地址
+  onLanAddressChanged: function (cb) { ipcRenderer.on('lan-address-changed', function (e, payload) { cb(payload); }); },
 });

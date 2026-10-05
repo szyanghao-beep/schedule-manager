@@ -20,6 +20,7 @@ import {
 import api from '../api';
 import store from '../store';
 import syncClient from '../syncClient';
+import { findPc } from '../findPc';
 
 export default function LoginScreen({ navigation }) {
   // 预填上次用过的地址（退出登录不再清空），避免每次手输电脑 IP
@@ -29,6 +30,8 @@ export default function LoginScreen({ navigation }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scanHint, setScanHint] = useState('');
 
   async function submit() {
     if (busy) return;
@@ -71,7 +74,7 @@ export default function LoginScreen({ navigation }) {
           style={styles.input}
           value={serverUrl}
           onChangeText={setServerUrl}
-          placeholder="电脑局域网地址，如 192.168.0.106:8787"
+          placeholder="点「自动查找电脑」自动填入，或手输 IP:端口"
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
@@ -79,6 +82,41 @@ export default function LoginScreen({ navigation }) {
         <Text style={styles.hint}>
           填电脑端「设置 → 本机同步服务」中显示的地址（可省略 http://）。真机需与电脑连同一 Wi-Fi；安卓模拟器访问宿主机用 http://10.0.2.2:8787
         </Text>
+
+        <TouchableOpacity
+          style={styles.scanBtn}
+          disabled={scanning}
+          onPress={async () => {
+            // 同步地址跟着电脑走：换电脑、换路由器后网段与 IP 都会变，
+            // 所以与其让用户去查 IP（还容易写错网段），不如让手机自己找。
+            setScanning(true);
+            setError('');
+            setScanHint('正在查找电脑…');
+            try {
+              const res = await findPc({
+                lastGoodUrl: serverUrl || store.getServerUrl(),
+                port: 8787,
+                onProgress: function (p) {
+                  setScanHint('正在查找… 已试 ' + p.scanned + '/' + p.total +
+                    (p.prefix ? '（网段 ' + p.prefix + '.x）' : ''));
+                },
+              });
+              if (res.url) {
+                setServerUrl(res.url);
+                setScanHint('已找到电脑：' + res.url);
+              } else {
+                setScanHint('没找到电脑：请确认电脑上已启用「本机同步服务」，且手机与电脑连的是同一个 WiFi。');
+              }
+            } catch (e) {
+              setScanHint('查找失败：' + (e && e.message ? e.message : e));
+            } finally {
+              setScanning(false);
+            }
+          }}
+        >
+          <Text style={styles.scanBtnText}>{scanning ? '查找中…' : '🔍 自动查找电脑'}</Text>
+        </TouchableOpacity>
+        {scanHint ? <Text style={styles.hint}>{scanHint}</Text> : null}
 
         <Text style={styles.label}>用户名</Text>
         <TextInput
@@ -154,6 +192,15 @@ const styles = StyleSheet.create({
   modeText: { fontSize: 14, color: '#4f8ef7' },
   modeTextActive: { color: '#fff', fontWeight: '600' },
   error: { color: '#e05b5b', marginTop: 12, fontSize: 13 },
+  scanBtn: {
+    marginTop: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#4f8ef7',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  scanBtnText: { color: '#4f8ef7', fontSize: 14, fontWeight: '600' },
   submit: {
     marginTop: 24,
     backgroundColor: '#4f8ef7',

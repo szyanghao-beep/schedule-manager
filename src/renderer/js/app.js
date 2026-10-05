@@ -119,6 +119,21 @@ window.App = (function () {
       Toast.error((payload && payload.message) || '每日邮件发送失败，请到设置中检查邮件配置');
     });
 
+    // 本机局域网地址变了（换网络/换主机）-> 提示更新其它设备上填的地址，
+    // 并告知是否已自动改用回环地址（回环不会随网段变化失效）
+    API.onLanAddressChanged(function (n) {
+      if (!n) return;
+      const parts = [];
+      if (n.previousIps && n.previousIps.length && n.currentIps && n.currentIps.length) {
+        parts.push('本机地址已变：' + n.previousIps.join('/') + ' → ' + n.currentIps.join('/'));
+      }
+      if (n.repaired) {
+        parts.push('同步地址已自动切到 ' + n.repaired.to + '（不受网段变化影响）');
+      }
+      parts.push('手机或其它设备需填新地址，可在「设置 → 本机同步服务」查看');
+      Toast.warning(parts.join('；'));
+    });
+
     // 导航切换
     document.querySelectorAll('.nav-item').forEach(function (btn) {
       btn.addEventListener('click', function () { switchView(btn.dataset.view); });

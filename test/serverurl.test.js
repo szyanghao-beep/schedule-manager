@@ -100,3 +100,81 @@ test('契约：示例文案里不残留编造的 192.168.1.x 地址（曾误导�
   });
   assert.deepStrictEqual(bad, [], 'placeholder/默认值里仍有编造的示例 IP：' + bad.join(', '));
 });
+
+// ---------------- 地址与「安装主机」解耦（换机器/换网段后仍能用） ----------------
+// 背景：同步地址跟着安装主机走 —— 换电脑、换路由器、DHCP 重新分配，网段和 IP 都会变。
+// 所以：本机自连要用回环地址；手机上要能按网段自动找回电脑。
+
+test('hostOf：从各种写法里取出主机名（不含端口）', function () {
+  assert.strictEqual(Utils.hostOf('http://192.168.0.106:8787'), '192.168.0.106');
+  assert.strictEqual(Utils.hostOf('192.168.1.6:8787'), '192.168.1.6', '漏写协议也要能解析');
+  assert.strictEqual(Utils.hostOf('https://sync.example.com'), 'sync.example.com');
+  assert.strictEqual(Utils.hostOf('http://[::1]:8787'), '::1', 'IPv6 方括号形式');
+  assert.strictEqual(Utils.hostOf(''), '');
+  assert.strictEqual(Utils.hostOf(null), '');
+});
+
+test('isLoopbackHost：认得出回环地址的各种写法', function () {
+  assert.strictEqual(Utils.isLoopbackHost('127.0.0.1'), true);
+  assert.strictEqual(Utils.isLoopbackHost('LOCALHOST'), true, '应忽略大小写');
+  assert.strictEqual(Utils.isLoopbackHost('::1'), true);
+  assert.strictEqual(Utils.isLoopbackHost('192.168.0.106'), false);
+  assert.strictEqual(Utils.isLoopbackHost(''), false);
+});
+
+test('★ isSelfServerUrl：判断地址是否指向「本机自己」（决定要不要改用回环地址）', function () {
+  const myIps = ['192.168.0.106'];
+  assert.strictEqual(Utils.isSelfServerUrl('http://192.168.0.106:8787', myIps), true,
+    '本机当前 IP → 是自己');
+  assert.strictEqual(Utils.isSelfServerUrl('http://192.168.1.6:8787', ['192.168.1.6', '192.168.0.106']), true,
+    '换成别的网段后，旧 IP 仍应被认作「曾经的自己」');
+  assert.strictEqual(Utils.isSelfServerUrl('http://127.0.0.1:8787', myIps), true);
+  assert.strictEqual(Utils.isSelfServerUrl('http://192.168.0.99:8787', myIps), false,
+    '局域网里别人的地址不能误判为自己（否则会把人家的地址改掉）');
+  assert.strictEqual(Utils.isSelfServerUrl('', myIps), false);
+});
+
+test('loopbackUrl：本机自连用回环地址，不受网段变化影响', function () {
+  assert.strictEqual(Utils.loopbackUrl(8787), 'http://127.0.0.1:8787');
+  assert.strictEqual(Utils.loopbackUrl(9000), 'http://127.0.0.1:9000');
+  assert.strictEqual(Utils.loopbackUrl(), 'http://127.0.0.1:8787', '默认 8787');
+});
+
+test('subnetPrefix / subnetCandidates：生成同网段候选地址（自动查找电脑用）', function () {
+  assert.strictEqual(Utils.subnetPrefix('192.168.0.106'), '192.168.0');
+  assert.strictEqual(Utils.subnetPrefix('10.0.0.5'), '10.0.0');
+  assert.strictEqual(Utils.subnetPrefix('192.168.0'), '', '只给三段不算完整 IP');
+  assert.strictEqual(Utils.subnetPrefix('999.1.1.1'), '', '越界的段要拒绝');
+  assert.strictEqual(Utils.subnetPrefix('bad'), '');
+
+  // 前缀与完整 IP 两种写法都要能用
+  assert.deepStrictEqual(
+    Utils.subnetCandidates('192.168.0', 8787, { start: 1, end: 3 }),
+    ['http://192.168.0.1:8787', 'http://192.168.0.2:8787', 'http://192.168.0.3:8787']
+  );
+  assert.deepStrictEqual(
+    Utils.subnetCandidates('192.168.0.106', 8787, { start: 1, end: 3 }),
+    ['http://192.168.0.1:8787', 'http://192.168.0.2:8787', 'http://192.168.0.3:8787']
+  );
+  assert.deepStrictEqual(
+    Utils.subnetCandidates('192.168.0', 8787, { start: 1, end: 3, exclude: ['192.168.0.2'] }),
+    ['http://192.168.0.1:8787', 'http://192.168.0.3:8787'],
+    '应能排除指定地址（例如手机自己的 IP）'
+  );
+  assert.deepStrictEqual(Utils.subnetCandidates('nonsense', 8787), [], '非法前缀给空数组而不是抛错');
+  assert.strictEqual(Utils.subnetCandidates('192.168.0', 8787).length, 254, '默认扫 1~254');
+});
+
+test('★ scanPrefixes：先试「上次成功的网段」，再退化到常见网段', function () {
+  const list = Utils.scanPrefixes('http://192.168.1.6:8787');
+  assert.strictEqual(list[0], '192.168.1', '上次成功的网段排最前，最可能命中');
+  assert.ok(list.indexOf('192.168.0') >= 0, '常见网段作为换网络后的兜底');
+
+  // 回环/空地址没有可用的网段信息，只返回常见网段
+  const list2 = Utils.scanPrefixes('http://127.0.0.1:8787');
+  assert.strictEqual(list2[0], '192.168.0', '回环地址没有网段信息，直接给常见网段');
+
+  // 去重：常见网段里已有 192.168.0，不应重复出现
+  const list3 = Utils.scanPrefixes('http://192.168.0.106:8787');
+  assert.strictEqual(list3.filter(function (p) { return p === '192.168.0'; }).length, 1, '不应重复');
+});

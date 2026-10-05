@@ -163,6 +163,42 @@ test('手机端按权限隐藏 Tab（与桌面端同一套规则，未登录不�
     '「收集」「我的」不应受权限控制');
 });
 
+test('★ 手机端必须能「自动查找电脑」（地址跟着电脑走，不能让用户自己查 IP）', function () {
+  const findPc = read('mobile/src/findPc.js');
+  // 必须用 app 标识确认「这就是我们的服务」，否则同网段里别的程序占 8787 会误判
+  assert.ok(/schedule-manager/.test(findPc), 'findPc 应校验 /health 的 app 标识');
+  assert.ok(/concurrency/.test(findPc) && /timeoutMs/.test(findPc),
+    '扫描必须有并发上限与超时，不能无界并发打满网络');
+  // 候选地址与网段排序必须复用 shared（与桌面端同一套实现）
+  assert.ok(/shared\.utils\.scanPrefixes/.test(findPc) && /shared\.utils\.subnetCandidates/.test(findPc),
+    'findPc 应复用 shared/utils.js 的候选生成逻辑');
+
+  // 两个需要填地址的界面都要有入口
+  ['mobile/src/screens/CollectScreen.js', 'mobile/src/screens/LoginScreen.js'].forEach(function (f) {
+    const src = read(f);
+    assert.ok(/from '\.\.\/findPc'/.test(src), f + ' 应引入 findPc');
+    assert.ok(/自动查找电脑/.test(src), f + ' 应提供「自动查找电脑」按钮');
+  });
+});
+
+test('★ 源码里不得写死示例 IP（地址随安装主机/网段而变，写死会误导用户照抄）', function () {
+  const files = [
+    'src/renderer/js/modules/settings.js', 'main.js',
+    'mobile/src/api.js', 'mobile/src/inboxDrop.js',
+    'mobile/src/screens/CollectScreen.js', 'mobile/src/screens/LoginScreen.js',
+  ];
+  const bad = [];
+  files.forEach(function (f) {
+    read(f).split('\n').forEach(function (line, i) {
+      // 注释里提到历史故障不算；只查会被用户看到/照抄的代码
+      if (/^\s*(\/\/|\*|\/\*)/.test(line)) return;
+      if (/192\.168\.\d+\.\d+/.test(line)) bad.push(f + ':' + (i + 1) + '  ' + line.trim().slice(0, 70));
+    });
+  });
+  assert.deepStrictEqual(bad, [],
+    '这些位置仍写死了示例 IP：\n  ' + bad.join('\n  '));
+});
+
 test('安卓端 versionName 与发布版本一致（防两端版本漂移）', function () {
   // 安卓 APK 的版本号曾经长期停在 versionCode 1 / versionName "1.0"：
   // 装上去看不出版本、系统也不提示更新，用户无法判断自己装的是哪一版。

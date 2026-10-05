@@ -24,6 +24,7 @@ import { useSyncExternalStore } from 'react';
 import store from '../store';
 import inboxDrop from '../inboxDrop';
 import formats from '../formats';
+import { findPc } from '../findPc';
 
 export default function CollectScreen() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -34,6 +35,7 @@ export default function CollectScreen() {
   const [url, setUrl] = useState(cfg0.url);
   const [code, setCode] = useState(cfg0.code);
   const [busy, setBusy] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [status, setStatus] = useState('');
 
   const items = store.getLocalInbox();
@@ -120,7 +122,7 @@ export default function CollectScreen() {
             style={styles.input}
             value={url}
             onChangeText={setUrl}
-            placeholder="如 192.168.0.106:8787（可省略 http://）"
+            placeholder="点「自动查找电脑」自动填入，或手输 IP:端口"
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
@@ -134,11 +136,45 @@ export default function CollectScreen() {
             keyboardType="number-pad"
             maxLength={6}
           />
+          <TouchableOpacity
+            style={styles.scanBtn}
+            disabled={scanning}
+            onPress={async () => {
+              // 自动查找：同步地址跟着电脑走（换电脑/换路由器后网段会变），
+              // 与其让用户去查 IP、还容易写错网段，不如自己去找。
+              setScanning(true);
+              setStatus('正在查找电脑…');
+              try {
+                const res = await findPc({
+                  lastGoodUrl: url || cfg0.url,
+                  port: 8787,
+                  onProgress: function (p) {
+                    setStatus('正在查找电脑… 已试 ' + p.scanned + '/' + p.total +
+                      (p.prefix ? '（网段 ' + p.prefix + '.x）' : ''));
+                  },
+                });
+                if (res.url) {
+                  setUrl(res.url);
+                  setStatus('已找到电脑：' + res.url + '，请确认口令后保存');
+                } else {
+                  setStatus('没找到电脑。请确认：① 电脑上已启用「本机同步服务」；② 手机与电脑连同一个 WiFi。' +
+                    '也可以直接在电脑「设置 → 本机同步服务」里看地址后手输。');
+                }
+              } catch (e) {
+                setStatus('查找失败：' + (e && e.message ? e.message : e));
+              } finally {
+                setScanning(false);
+              }
+            }}
+          >
+            <Text style={styles.scanBtnText}>{scanning ? '查找中…' : '🔍 自动查找电脑'}</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.saveBtn} onPress={saveConfig}>
             <Text style={styles.saveBtnText}>保存设置</Text>
           </TouchableOpacity>
           <Text style={styles.hint}>
             提示：手机需与电脑连同一个 WiFi；电脑端在「设置 → 本机同步服务」启用后即可接收。
+            电脑换网络后地址会变，用「自动查找电脑」最省事。
           </Text>
         </View>
       ) : null}
@@ -216,6 +252,15 @@ const styles = StyleSheet.create({
     color: '#222',
     backgroundColor: '#fafafa',
   },
+  scanBtn: {
+    marginTop: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#4f8ef7',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  scanBtnText: { color: '#4f8ef7', fontSize: 14, fontWeight: '600' },
   saveBtn: {
     marginTop: 12,
     backgroundColor: '#4f8ef7',

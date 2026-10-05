@@ -486,7 +486,7 @@ window.Modules.settings = (function () {
       const ipInput = el('input');
       ipInput.type = 'text';
       ipInput.value = st.serverUrl || '';
-      ipInput.placeholder = 'http://192.168.0.106:8787（可省略 http://）';
+      ipInput.placeholder = '点「填入局域网地址」自动读取，或手输 IP:端口（可省略 http://）';
       ipRow.appendChild(ipInput);
       editBox.appendChild(ipRow);
       const editBtns = el('div', 'toolbar');
@@ -530,7 +530,9 @@ window.Modules.settings = (function () {
       box.appendChild(btnRow);
     } else {
       // 预填上次用过的地址（退出登录不再清空 serverUrl），避免用户反复手输 IP
-      const server = syncField('服务器地址', 'http://192.168.0.106:8787（可省略 http://）');
+      // 注意：placeholder 里**不写死任何 IP** —— 地址随安装主机/网段而变，
+      // 写死一个具体地址会诱导用户照抄，换台机器就错（用户明确反馈过这点）。
+      const server = syncField('服务器地址', '点上方按钮自动填入，或手输 IP:端口（可省略 http://）');
       if (st && st.serverUrl) server.input.value = st.serverUrl;
       const user = syncField('用户名', '');
       const pass = syncField('密码', '', 'password');
@@ -538,11 +540,22 @@ window.Modules.settings = (function () {
       box.appendChild(user.row);
       box.appendChild(pass.row);
 
-      // 一键填入本机局域网地址：手机/队友要连的就是这台电脑时最常用，
-      // 免去用户自己查 IP（曾出现手输成 192.168.1.x 与真实网段不符导致同步失败）
       const fillLine = el('div', 'toolbar');
       fillLine.style.marginTop = '6px';
-      const fillBtn = el('button', 'btn btn-sm', '填入本机地址');
+
+      // 本机自连最省事、也最不怕换网络：回环地址永远指向本机，
+      // 不受 IP / 网段 / 换主机影响（用户明确反馈过「网段会随安装主机变化」）。
+      const localBtn = el('button', 'btn btn-primary btn-sm', '连接本机');
+      localBtn.title = '填 http://127.0.0.1:8787 —— 永远指向这台电脑，换网络/换网段都不会失效';
+      localBtn.addEventListener('click', function () {
+        server.input.value = window.Utils.loopbackUrl(8787);
+        window.Toast.success('已填入本机回环地址（不受网段变化影响）');
+      });
+      fillLine.appendChild(localBtn);
+
+      // 一键填入本机局域网地址：手机/队友要连的就是这台电脑时用，
+      // 免去用户自己查 IP（曾出现手输成 192.168.1.x 与真实网段不符导致同步失败）
+      const fillBtn = el('button', 'btn btn-sm', '填入局域网地址');
       const fillHint = el('span', 'item-meta', '');
       fillHint.style.marginLeft = '8px';
       fillBtn.addEventListener('click', function () {

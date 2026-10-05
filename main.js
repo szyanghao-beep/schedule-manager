@@ -57,7 +57,7 @@ let emailSending = false; // 发送中防重入（避免 30s 轮询期间重复�
 let aiSecret = { apiKey: '' }; // AI API key（仅内存 + 加密落盘）
 let syncServer = null;      // 内嵌同步服务器 http.Server 实例（null=未运行）
 let syncServerDb = null;    // node:sqlite 数据库（服务器关闭时 close）
-let syncServerState = { enabled: false, port: 8787, running: false, error: '' }; // 内嵌服务器开关与状态
+let syncServerState = { enabled: false, port: 8787, running: false, error: '', lastIps: [] }; // 内嵌服务器开关与状态
 
 // ---------- 路径 ----------
 function dataFilePath() { return path.join(app.getPath('userData'), DATA_FILE); }
@@ -909,12 +909,73 @@ function loadSyncServerState() {
     const s = JSON.parse(fs.readFileSync(syncServerFilePath(), 'utf-8'));
     syncServerState.enabled = !!s.enabled;
     syncServerState.port = Number(s.port) || 8787;
+    syncServerState.lastIps = Array.isArray(s.lastIps) ? s.lastIps.slice() : [];
   } catch (e) { /* 默认未启用 */ }
+}
+
+// ---------- 局域网地址变化检测 ----------
+// 为什么需要：同步地址跟着**安装主机**走。换电脑、换路由器、DHCP 重新分配，
+// 网段和 IP 都会变；写死或「存下来就不管」的地址迟早失效。
+//
+// 处理策略（不静默改配置）：
+//   1. 若已保存的服务器地址指向**本机自己**（当前 IP 或历史 IP）→ 改用回环地址
+//      127.0.0.1。回环永远指向本机，从此不受网段变化影响；同时明确告知用户。
+//   2. 若指向的是别人的机器 → 绝不动它（可能真的是团队里另一台同步服务器）。
+//   3. 只要本机 IP 变了，就通知界面，方便用户去更新手机端/其它设备上填的地址。
+let lanNotice = null; // 最近一次地址变化提示（供界面展示）
+
+function checkLanAddressChange(trigger) {
+  const ips = localNetworkIps();
+  const prev = syncServerState.lastIps || [];
+  const sortedNow = ips.slice().sort().join(',');
+  const sortedPrev = prev.slice().sort().join(',');
+  const changed = prev.length > 0 && sortedNow !== sortedPrev;
+  const knownSelfIps = prev.concat(ips); // 历史 + 当前都算「自己」
+
+  let repaired = null;
+  if (syncState.serverUrl && Utils.isSelfServerUrl(syncState.serverUrl, knownSelfIps)
+      && !Utils.isLoopbackHost(Utils.hostOf(syncState.serverUrl))) {
+    const loop = Utils.loopbackUrl(syncServerState.port);
+    const old = syncState.serverUrl;
+    syncState.serverUrl = loop;
+    // 换了地址 → 重置游标做一次全量对齐（与 sync:set-server 一致）
+    syncState.lastPulledAt = 0;
+    syncState.lastPushedAt = 0;
+    persistSyncState();
+    repaired = { from: old, to: loop };
+    console.log('[lan] 已保存的服务器地址指向本机自己，改用回环地址（不受网段变化影响）：' + old + ' -> ' + loop);
+  }
+
+  syncServerState.lastIps = ips;
+  persistSyncServerState();
+
+  if (changed || repaired) {
+    lanNotice = {
+      at: Date.now(),
+      trigger: trigger || 'startup',
+      previousIps: prev,
+      currentIps: ips,
+      repaired: repaired,
+    };
+    if (changed) {
+      console.log('[lan] 本机局域网地址发生变化：' + (prev.join(',') || '(无)') + ' -> ' + (ips.join(',') || '(无)'));
+    }
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('lan-address-changed', lanNotice);
+    }
+  }
+  return lanNotice;
 }
 
 function persistSyncServerState() {
   try {
-    fs.writeFileSync(syncServerFilePath(), JSON.stringify({ enabled: syncServerState.enabled, port: syncServerState.port }, null, 2), 'utf-8');
+    fs.writeFileSync(syncServerFilePath(), JSON.stringify({
+      enabled: syncServerState.enabled,
+      port: syncServerState.port,
+      // 记录上次见到的本机 IP：用于判断「换网络/换主机后地址变了」，
+      // 并识别「已保存的服务器地址其实指向本机自己」→ 改用回环地址
+      lastIps: syncServerState.lastIps || [],
+    }, null, 2), 'utf-8');
   } catch (e) { console.error('[sync-server] 状态保存失败', e); }
 }
 
@@ -1448,8 +1509,14 @@ app.whenReady().then(function () {
   registerQuickCapture(); // 全局快速捕捉快捷键
   checkReminders(); // 启动即查一次
   checkEmailReminder(); // 启动即查一次每日邮件
+  // 检查本机局域网地址是否变了（换网络/换主机后网段会变）。
+  // 若已保存的同步地址其实指向本机自己 → 自动改用回环地址，从此不受网段变化影响。
+  // 放在 createWindow 之后：需要窗口就绪才能把提示推给界面。
+  checkLanAddressChange('startup');
   setInterval(checkReminders, REMINDER_INTERVAL);
   setInterval(checkEmailReminder, REMINDER_INTERVAL);
+  // 运行期间也可能换网络（切 WiFi、插网线），定期复查；os.networkInterfaces 很轻，60 秒一次足够
+  setInterval(function () { checkLanAddressChange('interval'); }, 60 * 1000);
   // 启动自动同步：已登录时稍作延迟（等渲染层加载完），先推后拉
   if (syncAuthed()) {
     setTimeout(function () {

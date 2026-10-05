@@ -43,4 +43,5 @@ window.API = {
   syncServerStatus: function () { return window.api.syncServerStatus(); },
   syncServerStart: function () { return window.api.syncServerStart(); },
   syncServerStop: function () { return window.api.syncServerStop(); },
+  onLanAddressChanged: function (cb) { window.api.onLanAddressChanged(cb); },
 };

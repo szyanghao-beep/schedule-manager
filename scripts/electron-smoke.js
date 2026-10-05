@@ -67,7 +67,9 @@ async function main() {
     // 3b) 同步服务器地址可修改（本次修复：此前设置里无处可改 IP）
     out.hasSyncSetServer = typeof window.API.syncSetServer === 'function';
     out.hasNormalizeUtil = !!(window.Utils && typeof window.Utils.normalizeServerUrl === 'function');
-    out.settingsHasFillLocalBtn = sEl ? sEl.textContent.indexOf('填入本机地址') >= 0 : false;
+    out.settingsHasFillLocalBtn = sEl ? sEl.textContent.indexOf('填入局域网地址') >= 0 : false;
+    // 「连接本机」用回环地址，换网络/换主机都不会失效（用户反馈网段会随主机变化）
+    out.settingsHasLoopbackBtn = sEl ? sEl.textContent.indexOf('连接本机') >= 0 : false;
     // 真调一次：只填 IP:端口（漏协议）应被自动补全 http://
     try {
       out.setServerRes = await window.API.syncSetServer('192.168.0.99:8787');
@@ -395,7 +397,8 @@ async function main() {
   console.log('== 同步地址可修改（用户痛点：无法改 IP）==');
   check('API 含 syncSetServer（设置里可改服务器地址）', result.hasSyncSetServer === true);
   check('渲染层已加载 Utils.normalizeServerUrl（地址容错共用实现）', result.hasNormalizeUtil === true);
-  check('登录表单含「填入本机地址」一键按钮', result.settingsHasFillLocalBtn === true);
+  check('登录表单含「填入局域网地址」一键按钮', result.settingsHasFillLocalBtn === true);
+  check('★ 登录表单含「连接本机」（回环地址，不怕换网段）', result.settingsHasLoopbackBtn === true);
   check('syncSetServer 自动补 http://（只填 IP:端口 也能用）',
     !!result.setServerRes && result.setServerRes.serverUrl === 'http://192.168.0.99:8787',
     result.setServerError || JSON.stringify(result.setServerRes));

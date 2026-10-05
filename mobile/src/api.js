@@ -27,7 +27,7 @@ const normalizeBaseUrl = shared.utils.normalizeServerUrl;
 // 通用请求：JSON 收发 + 超时（AbortController）
 async function request(baseUrl, path, options = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
   const base = normalizeBaseUrl(baseUrl);
-  if (!base) throw new Error('请先填写电脑端地址，如 http://192.168.0.106:8787');
+  if (!base) throw new Error('请先填写电脑端地址（格式 IP:端口，可用「自动查找电脑」）');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

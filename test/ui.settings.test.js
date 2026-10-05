@@ -34,8 +34,10 @@ test('设置页 · 未登录时渲染登录表单（服务器地址/用户名/�
   assert.deepStrictEqual(rows.map(function (r) { return r.label; }), ['服务器地址', '用户名', '密码']);
   assert.deepStrictEqual(rows.map(function (r) { return r.type; }), ['text', 'text', 'password']);
 
-  // 按钮：填入本机地址（便捷） + 登录 + 注册并登录
-  assert.deepStrictEqual(h.texts('button', card), ['填入本机地址', '登录', '注册并登录']);
+  // 按钮：连接本机（回环，不怕换网段） + 填入局域网地址（给手机/队友用） + 登录 + 注册并登录
+  assert.deepStrictEqual(h.texts('button', card),
+    ['连接本机', '填入局域网地址', '登录', '注册并登录'],
+    '实际：' + JSON.stringify(h.texts('button', card)));
 
   // 未登录时不出现已登录状态的操作按钮
   assert.strictEqual(h.allByText('button', '立即同步', root).length, 0);
@@ -246,6 +248,29 @@ test('设置页 · 字段为空时点登录：本地拦截，不发 IPC', async 
   assert.deepStrictEqual(h.toasts(), ['请填写服务器地址、用户名和密码']);
 });
 
+test('★ 设置页 · 「连接本机」填入回环地址（换网络/换主机都不会失效）', async function (t) {
+  // 用户明确反馈过「网段会随程序安装的主机变化」。
+  // 本机自连时用 127.0.0.1 最稳：它永远指向本机，不受 IP / 网段 / 换电脑影响。
+  const h = await setupUi({
+    now: FIXED_NOW,
+    api: {
+      syncStatus: { loggedIn: false, serverUrl: '' },
+      syncServerStatus: { running: true, port: 8787, ips: ['192.168.1.23'], url: 'http://192.168.1.23:8787', pairingCode: '246810' },
+    },
+  });
+  t.after(function () { h.close(); });
+  const root = h.renderView('settings');
+  await flush();
+  const card = h.cardByTitle('多端同步', root);
+
+  h.clickText('button', '连接本机', card);
+  await flush();
+  assert.strictEqual(h.qs('input', card).value, 'http://127.0.0.1:8787',
+    '应填入回环地址，而不是会被网段变化影响的局域网 IP');
+  assert.ok(h.toasts().some(function (s) { return s.indexOf('不受网段变化影响') >= 0; }),
+    JSON.stringify(h.toasts()));
+});
+
 test('设置页 · 填入本机地址：点一次把同步服务的局域网地址填进服务器地址框', async function (t) {
   const h = await setupUi({
     now: FIXED_NOW,
@@ -260,7 +285,7 @@ test('设置页 · 填入本机地址：点一次把同步服务的局域网地�
   await flush();
   const card = h.cardByTitle('多端同步', root);
 
-  h.clickText('button', '填入本机地址', card);
+  h.clickText('button', '填入局域网地址', card);
   await flush();
 
   assert.strictEqual(h.qs('input', card).value, 'http://192.168.1.23:8787');
