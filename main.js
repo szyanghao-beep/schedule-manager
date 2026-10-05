@@ -758,23 +758,51 @@ function notifyConflict(conflicts) {
 }
 
 async function syncRequest(method, path, body) {
-  const res = await fetch(syncState.serverUrl + path, {
-    method: method,
-    headers: Object.assign(
-      { 'Authorization': 'Bearer ' + syncState.token },
-      body ? { 'Content-Type': 'application/json' } : {}
-    ),
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  // 登录/注册走的是「凭据校验」端点：它的 401 意思是「用户名或密码错误」，
+  // 与会话过期完全是两回事，处理方式必须区分开。
+  const isAuthCall = path.indexOf('/api/auth/login') === 0 || path.indexOf('/api/auth/register') === 0;
+
+  let res;
+  try {
+    res = await fetch(syncState.serverUrl + path, {
+      method: method,
+      headers: Object.assign(
+        { 'Authorization': 'Bearer ' + syncState.token },
+        body ? { 'Content-Type': 'application/json' } : {}
+      ),
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (e) {
+    // 网络层失败（地址写错、服务没开、不在同一网络）。
+    // 这里必须给出可操作的信息，并把本机真实局域网地址列出来 ——
+    // 「手输 IP 写错网段」是最高频的原因（例如本机是 192.168.0.x 却填了 192.168.1.x）。
+    const ips = localNetworkIps();
+    const hint = ips.length
+      ? ('本机局域网地址是 ' + ips.map(function (ip) { return 'http://' + ip + ':8787'; }).join(' 或 '))
+      : '本机未检测到局域网地址（请确认已连 WiFi 或网线）';
+    throw new Error(
+      '连不上服务器 ' + syncState.serverUrl + '。请依次确认：' +
+      '① 地址没写错（' + hint + '）；' +
+      '② 目标电脑上的「本机同步服务」已启用；' +
+      '③ 你与目标电脑在同一网络。'
+    );
+  }
+
   const json = await res.json().catch(function () { return {}; });
   if (res.status === 401) {
+    if (isAuthCall) {
+      // 关键：不要把「密码错」伪装成「登录已失效」。
+      // 否则用户明明还没登录成功，却被告知「登录已失效，请重新登录」，完全被误导。
+      throw new Error(json.error || '用户名或密码错误');
+    }
     // token 失效（常见于「改了服务器地址，指向另一台服务器」或服务端重置）
     // 清掉本地登录态，让界面回到登录表单，而不是反复抛 HTTP 401 让用户无从下手
     clearSyncAuth();
     throw new Error('登录已失效，请在设置中重新登录（服务器：' + syncState.serverUrl + '）');
   }
   if (res.status === 403) {
-    // 管理员停用了这个账号（或被取消了权限）。明确告知，不要伪装成网络错误。
+    // 登录时 403 = 账号被管理员停用；同步时 403 同义。都原样透出服务端的说明。
+    if (isAuthCall) throw new Error(json.error || '账号已被管理员停用，请联系管理员');
     clearSyncAuth();
     throw new Error(json.error || '账号已被停用，请联系管理员');
   }

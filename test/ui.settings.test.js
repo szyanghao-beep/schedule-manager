@@ -265,8 +265,13 @@ test('设置页 · 填入本机地址：点一次把同步服务的局域网地�
 
   assert.strictEqual(h.qs('input', card).value, 'http://192.168.1.23:8787');
   assert.ok(h.toasts().indexOf('已填入本机地址 192.168.1.23') >= 0, JSON.stringify(h.toasts()));
-  // 登录表单里的提示行应告知本机同步服务在运行
-  assert.ok(h.texts('.item-meta', card).indexOf('本机同步服务运行中') >= 0, JSON.stringify(h.texts('.item-meta', card)));
+  // 登录表单里的提示行应告知本机同步服务在运行，**并列出本机真实地址** ——
+  // 手输 IP 写错网段是同步失败的最高频原因，把正确答案直接摆出来才能防止再填错。
+  const hintTexts = h.texts('.item-meta', card);
+  assert.ok(hintTexts.some(function (s) { return s.indexOf('本机同步服务运行中') >= 0; }),
+    JSON.stringify(hintTexts));
+  assert.ok(hintTexts.some(function (s) { return s.indexOf('192.168.1.23:8787') >= 0; }),
+    '提示行应显示本机地址，便于用户核对：' + JSON.stringify(hintTexts));
 });
 
 test('设置页 · 本机同步服务开关：勾选后调用 syncServerStart 并显示地址与配对码', async function (t) {

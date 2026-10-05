@@ -559,11 +559,14 @@ window.Modules.settings = (function () {
       fillLine.appendChild(fillBtn);
       fillLine.appendChild(fillHint);
       box.appendChild(fillLine);
-      // 顺带提示本机是否已开同步服务，否则填了也连不上
+      // 顺带提示本机是否已开同步服务，并**把本机真实地址显示出来** ——
+      // 手输 IP 写错网段（如本机 192.168.0.x 却填 192.168.1.x）是同步失败的最高频原因，
+      // 直接摆出正确答案比让用户自己去查 IP 有效得多。
       window.API.syncServerStatus().then(function (s) {
-        fillHint.textContent = (s && s.running)
-          ? '本机同步服务运行中'
-          : '提示：本机同步服务未启用，需先到下方「本机同步服务」开启';
+        const ips = (s && s.ips) || [];
+        const mine = ips.length ? ('　本机是 ' + ips.map(function (ip) { return ip + ':' + (s.port || 8787); }).join(' / ')) : '';
+        fillHint.textContent = ((s && s.running) ? '本机同步服务运行中' : '提示：本机同步服务未启用，需先到下方「本机同步服务」开启') + mine;
+        fillHint.style.color = (s && s.running) ? 'var(--muted)' : 'var(--warning)';
       }).catch(function () {});
 
       const btnRow = el('div', 'toolbar');

@@ -70,13 +70,21 @@ test('契约：桌面端与手机端共用 shared 的同一实现（防再次各
     'mobile/src/inboxDrop.js 应委托 shared.utils.normalizeServerUrl'
   );
 
-  // 不应再有自行拼 http:// 的实现（出现即说明又复制了一份逻辑）
+  // 不应再有「自行实现地址归一化」的痕迹。
+  // 判据用「协议判断正则」而不是简单的 `'http://' +`：
+  // 拼接 http:// 也可能只是**构造给用户看的提示串**（例如把检测到的局域网 IP
+  // 拼成示例地址），那不算重复实现归一化；真正的重复实现一定会先判断协议前缀。
   const dup = [];
   [['main.js', main], ['mobile/src/api.js', mobileApi], ['mobile/src/inboxDrop.js', mobileDrop]]
     .forEach(function (pair) {
-      if (/'http:\/\/'\s*\+/.test(pair[1])) dup.push(pair[0]);
+      const src = pair[1];
+      const hasProtoCheck = /\^https\?:\\\/\\\//.test(src) || /!\/\^https\?:/.test(src);
+      // 归一化实现的另一个特征：去掉末尾斜杠
+      const stripsSlash = /replace\(\/\\\/\+\$\/,\s*''\)/.test(src);
+      if (hasProtoCheck && stripsSlash) dup.push(pair[0]);
     });
-  assert.deepStrictEqual(dup, [], '这些文件又自行拼接了 http:// 前缀，应改用 shared 实现：' + dup.join(', '));
+  assert.deepStrictEqual(dup, [],
+    '这些文件看起来又自行实现了一份地址归一化（协议判断 + 去尾斜杠），应改用 shared 实现：' + dup.join(', '));
 });
 
 test('契约：示例文案里不残留编造的 192.168.1.x 地址（曾误导用户照抄）', function () {
