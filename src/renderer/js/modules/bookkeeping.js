@@ -106,9 +106,13 @@ window.Modules.bookkeeping = (function () {
     wrap.appendChild(sumCard);
 
     const list = el('div');
+    // 用 BK.inRange 判定区间（与上面的合计走同一个函数）。
+    // 以前这里直接写 t.date >= r.from && t.date < r.to：日期是数字还是
+    // 'YYYY-MM-DD' 字符串会得出完全相反的结果（导入的旧数据是字符串），
+    // 于是出现「合计里有钱、明细却是空的」—— 两条路径必须共用同一个判定。
     const txns = state.transactions
-      .filter(function (t) { return t.date >= r.from && t.date < r.to; })
-      .sort(function (a, b) { return b.date - a.date || b.updatedAt - a.updatedAt; });
+      .filter(function (t) { return BK.inRange(t.date, r.from, r.to); })
+      .sort(function (a, b) { return BK.txnTime(b.date) - BK.txnTime(a.date) || b.updatedAt - a.updatedAt; });
     txns.forEach(function (t) { list.appendChild(txnRow(t)); });
     if (!txns.length) list.appendChild(el('div', 'placeholder', '本月暂无流水，点右上角「+ 记一笔」'));
     wrap.appendChild(list);
@@ -668,7 +672,7 @@ window.Modules.bookkeeping = (function () {
     const daily = {};
     state.transactions.forEach(function (t) {
       if (t.deleted || t.type !== 'expense') return;
-      if (t.date < from || t.date >= to) return;
+      if (!BK.inRange(t.date, from, to)) return;
       const k = Utils.toDateStr(t.date);
       daily[k] = (daily[k] || 0) + Number(t.amount) || 0;
     });

@@ -119,6 +119,14 @@ window.App = (function () {
       Toast.error((payload && payload.message) || '每日邮件发送失败，请到设置中检查邮件配置');
     });
 
+    // 同步被数据安全护栏拦下 -> 明确告知「这次同步没有生效」，不能让用户以为成功了
+    API.onSyncAborted(function (payload) {
+      const v = (payload && payload.violations) || [];
+      const names = v.map(function (x) { return x.field + '（' + x.before + ' → ' + x.after + '）'; }).join('、');
+      Toast.error('同步已中止以保护本地数据：本次合并会让 ' + names +
+        ' 条记录无故消失（而非被删除）。本地数据未被改动，请把这条提示反馈给开发者。');
+    });
+
     // 本机局域网地址变了（换网络/换主机）-> 提示更新其它设备上填的地址，
     // 并告知是否已自动改用回环地址（回环不会随网段变化失效）
     API.onLanAddressChanged(function (n) {

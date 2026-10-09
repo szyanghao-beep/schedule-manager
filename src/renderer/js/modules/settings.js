@@ -579,7 +579,7 @@ window.Modules.settings = (function () {
         const ips = (s && s.ips) || [];
         const mine = ips.length ? ('　本机是 ' + ips.map(function (ip) { return ip + ':' + (s.port || 8787); }).join(' / ')) : '';
         fillHint.textContent = ((s && s.running) ? '本机同步服务运行中' : '提示：本机同步服务未启用，需先到下方「本机同步服务」开启') + mine;
-        fillHint.style.color = (s && s.running) ? 'var(--muted)' : 'var(--warning)';
+        fillHint.style.color = (s && s.running) ? 'var(--muted)' : 'var(--warning-text)';
       }).catch(function () {});
 
       const btnRow = el('div', 'toolbar');

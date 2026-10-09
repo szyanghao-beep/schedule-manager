@@ -55,12 +55,53 @@
     return initial + net;
   }
 
+  // 流水日期 -> 毫秒时间戳（统一类型后再比较）
+  //
+  // 为什么必须归一化：界面写入的 date 是**数字时间戳**（Utils.parseDateTime），
+  // 但导入的旧数据 / 手改的 JSON 里的 date 可能是 'YYYY-MM-DD' 字符串。
+  // 数字与字符串用 < / >= 比较时，JS 会把字符串转成 NaN，比较结果恒为 false，
+  // 于是同一批数据在不同代码路径上结论相反 —— 表现为「本月合计里有钱，
+  // 明细列表却是空的」。所以这里统一转成时间戳再比。
+  // 无法解析时返回 null（该条不参与区间判定，而不是悄悄被算进某个区间）。
+  function txnTime(date) {
+    if (date == null || date === '') return null;
+    if (typeof date === 'number') return isFinite(date) ? date : null;
+    if (typeof date === 'string') {
+      const s = date.trim();
+      if (!s) return null;
+      // 纯数字字符串按时间戳处理
+      if (/^\d+$/.test(s)) return Number(s);
+      // 'YYYY-MM-DD' / 'YYYY/MM/DD' / 'YYYY-MM-DD HH:mm(:ss)' / ISO
+      const m = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+      if (m) {
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]),
+          Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0));
+        const t = d.getTime();
+        return isFinite(t) ? t : null;
+      }
+      const t = new Date(s).getTime();
+      return isFinite(t) ? t : null;
+    }
+    return null;
+  }
+
+  // 是否落在 [from, to) 区间内（from 含、to 不含）。from/to 可以是时间戳或日期字符串。
+  function inRange(date, from, to) {
+    const t = txnTime(date);
+    if (t == null) return false;
+    const f = txnTime(from);
+    const e = txnTime(to);
+    if (f != null && t < f) return false;
+    if (e != null && t >= e) return false;
+    return true;
+  }
+
   // 区间收支汇总（含 from，不含 to；transfer 不计入收支，仅影响账户余额）
   function monthlySummary(transactions, from, to) {
     let income = 0, expense = 0;
     (transactions || []).forEach(function (t) {
       if (!t || t.deleted) return;
-      if (t.date == null || t.date < from || t.date >= to) return;
+      if (!inRange(t.date, from, to)) return;
       const amt = Number(t.amount) || 0;
       if (t.type === 'income') income += amt;
       else if (t.type === 'expense') expense += amt;
@@ -75,7 +116,7 @@
       if (!t || t.deleted) return;
       if (t.type !== 'income' && t.type !== 'expense') return;
       if (!t.categoryId) return;
-      if (t.date == null || t.date < from || t.date >= to) return;
+      if (!inRange(t.date, from, to)) return;
       const key = t.categoryId + '|' + t.type;
       if (!agg[key]) agg[key] = { categoryId: t.categoryId, type: t.type, amount: 0 };
       agg[key].amount += Number(t.amount) || 0;
@@ -94,7 +135,7 @@
     let uncategorized = 0;
     (transactions || []).forEach(function (t) {
       if (!t || t.deleted || t.type !== 'expense') return;
-      if (t.date == null || t.date < from || t.date >= to) return;
+      if (!inRange(t.date, from, to)) return;
       const amt = Number(t.amount) || 0;
       if (t.categoryId) spentByCat[t.categoryId] = (spentByCat[t.categoryId] || 0) + amt;
       else uncategorized += amt;
@@ -136,6 +177,8 @@
     yuanToCents: yuanToCents,
     txnFlow: txnFlow,
     accountBalance: accountBalance,
+    txnTime: txnTime,
+    inRange: inRange,
     monthlySummary: monthlySummary,
     categoryBreakdown: categoryBreakdown,
     budgetStatus: budgetStatus,

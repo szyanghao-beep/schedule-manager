@@ -68,6 +68,12 @@ window.Store = (function () {
   function scheduleSave() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
+      // ⚠️ 这里必须包含**所有**需要落盘的顶层数组。
+      // 曾漏了 customers / followups：客户的新增与修改只留在渲染层内存里，
+      // 既不落盘也不参与同步推送；而一旦点同步，主进程会用它自己那份（没有客户的）
+      // 数据合并后写盘并刷新界面 —— 用户看到的就是「多端同步之后客户被清空」。
+      // test/field-coverage.test.js 会强制这里与 publicData / data:save / applyImported
+      // 的字段集合保持一致。
       window.API.saveData({
         categories: state.categories,
         events: state.events,
@@ -78,6 +84,8 @@ window.Store = (function () {
         bookkeepingCategories: state.bookkeepingCategories,
         budgets: state.budgets,
         memorials: state.memorials,
+        customers: state.customers,
+        followups: state.followups,
       });
     }, 500);
   }
@@ -96,6 +104,12 @@ window.Store = (function () {
 
   function touch(rec) {
     const now = Date.now();
+    // 兜底补 id：缺 id 的记录在同步合并时会挤到同一个 key（entityType:undefined）上，
+    // 合并后只剩一条 —— 表现为「一批数据被清空」。放在这个统一入口，
+    // 任何实体、任何调用路径都不会漏。
+    // 注意用赋值而不是 Object.assign 默认值：调用方显式传 id: undefined 时，
+    // Object.assign 会把默认值覆盖掉，仍然得到 undefined。
+    if (!rec.id) rec.id = window.Utils.genId();
     // updatedAt 取「当前时间」与「记录已有时间 + 1」的较大者，保证同一条记录时间戳单调递增，
     // 避免本地时钟回拨时新编辑被服务端 LWW 误判为「旧编辑」而拒绝。
     rec.updatedAt = Math.max(now, (rec.updatedAt || 0) + 1);
@@ -236,6 +250,7 @@ window.Store = (function () {
   function addCustomer(c) {
     const now = Date.now();
     const rec = Object.assign({
+      // id 由 touch() 统一兜底补（缺 id 会在同步合并时挤成同一个 key，导致一批客户被清空）
       stage: 'lead',
       contact: '', phone: '', owner: '', remark: '',
       amountHistory: [],

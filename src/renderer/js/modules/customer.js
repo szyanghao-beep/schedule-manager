@@ -48,7 +48,9 @@ window.Modules.customer = (function () {
     const box = el('div', 'item-meta');
     if (next == null) {
       box.textContent = '尚未安排下次跟进';
-      box.style.color = 'var(--warning)';
+      // 用 --warning-text（文字安全色）：--warning 是亮橙，当文字放在白底上
+      // 对比度只有 2.05，UI 审计报「看不清」
+      box.style.color = 'var(--warning-text)';
       return box;
     }
     const diff = next - now;
@@ -60,7 +62,7 @@ window.Modules.customer = (function () {
     else text = days + ' 天后跟进（' + Utils.toDateStr(next) + '）';
     box.textContent = '下次跟进：' + Utils.toDateTimeStr(next) + ' · ' + text;
     if (diff < 0) box.style.color = 'var(--danger)';
-    else if (days <= 1) box.style.color = 'var(--warning)';
+    else if (days <= 1) box.style.color = 'var(--warning-text)';
     return box;
   }
 
@@ -235,7 +237,7 @@ window.Modules.customer = (function () {
         (r.dueTodayCount ? '今天 ' + r.dueTodayCount + '　' : '') +
         (r.noNextCount ? '未安排 ' + r.noNextCount : ''));
       if (r.overdueCount) warn.style.color = 'var(--danger)';
-      else if (r.dueTodayCount) warn.style.color = 'var(--warning)';
+      else if (r.dueTodayCount) warn.style.color = 'var(--warning-text)';
       side.appendChild(warn);
 
       if (r.owner) {
@@ -288,7 +290,7 @@ window.Modules.customer = (function () {
     amountLine.style.marginTop = '4px';
     if (sum.hasDeal) {
       amountLine.textContent = '成交 ' + money(sum.won) + (sum.upsellTotal ? '（首单 ' + money(sum.deal) + ' + 增购 ' + money(sum.upsellTotal) + '）' : '');
-      amountLine.style.color = 'var(--success)';
+      amountLine.style.color = 'var(--success-text)';
     } else if (sum.expected) {
       amountLine.textContent = '预估 ' + money(sum.expected) + '（未落单）';
       amountLine.style.color = 'var(--muted)';
@@ -361,7 +363,7 @@ window.Modules.customer = (function () {
     lines.forEach(function (p) {
       const row = el('div', 'item-meta');
       row.textContent = p[0] + '：' + p[1];
-      if (p[0] === '累计成交') { row.style.fontWeight = '600'; row.style.color = 'var(--success)'; }
+      if (p[0] === '累计成交') { row.style.fontWeight = '600'; row.style.color = 'var(--success-text)'; }
       amtMain.appendChild(row);
     });
     amtBox.appendChild(amtMain);

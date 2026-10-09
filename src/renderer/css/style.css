@@ -6,12 +6,17 @@
   --surface: #ffffff;
   --border: #e4e6ea;
   --text: #1f2329;
-  --muted: #8a8f98;
+  --muted: #6b7280;
   --primary: #4f8ef7;
   --primary-hover: #3d7ce0;
   --danger: #e05b5b;
   --success: #4caf7d;
   --warning: #f2a541;
+  /* 文字安全色：--success/--warning 是给「背景/边框」用的亮色，
+     直接当文字色放在白底上对比度只有 2.0~2.4（看不清，审计会报），
+     所以文字一律用这两个加深版本。 */
+  --success-text: #1c7a4e;
+  --warning-text: #96601a;
   --radius: 8px;
 }
 
@@ -188,7 +193,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 }
 .badge-pending { background: #eef0f3; color: #5c626d; }
 .badge-doing { background: #eaf1fd; color: var(--primary); }
-.badge-done { background: #e8f6ef; color: var(--success); }
+.badge-done { background: #e8f6ef; color: var(--success-text); }
 .badge-overdue { background: #fdeeee; color: var(--danger); }
 .badge-low { background: #eef0f3; color: #5c626d; }
 .badge-medium { background: #fdf3e3; color: #c07f14; }
@@ -250,6 +255,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   justify-content: space-between;
   padding: 14px 18px;
   border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 .modal-title { font-size: 15px; font-weight: 600; }
 .modal-close {
@@ -259,14 +265,29 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   cursor: pointer;
   color: var(--muted);
   line-height: 1;
+  /* 关闭按钮必须够大够好点：之前只有 12×20，UI 审计判为「点不到」。
+     同时用 flex 居中让「×」在热区内视觉居中。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  min-height: 30px;
+  margin: -6px -8px -6px 0;
+  border-radius: 6px;
 }
-.modal-body { padding: 16px 18px; overflow: auto; }
+.modal-close:hover { background: var(--bg); color: var(--text); }
+/* body 是滚动容器：内容高时自己滚动，footer 始终留在窗口内（实测 900×551
+   的矮窗口下 bodyClientH 378 / scrollH 753，底栏按钮仍在窗口内可点）。
+   可滚动容器的 min-height:auto 本就解析为 0，这里显式写出来是为了不依赖这条
+   隐式规则：万一将来去掉 overflow:auto，footer 也不会被顶出窗口。 */
+.modal-body { padding: 16px 18px; overflow: auto; flex: 1 1 auto; min-height: 0; }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   padding: 12px 18px;
   border-top: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 
 /* 表单 */

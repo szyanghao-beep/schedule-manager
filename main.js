@@ -699,25 +699,48 @@ function recordContentKey(rec) {
   return JSON.stringify(o);
 }
 
-// 把远程变更 LWW 合并进本地数据（含软删除墓碑），并检测「本地修改被远程覆盖」的冲突
-function applyRemoteChanges(changes) {
-  const map = new Map();
-  sync.recordsToMap(data.categories, sync.ENTITY_TYPES.CATEGORY).forEach(function (v, k) { map.set(k, v); });
-  sync.recordsToMap(data.events, sync.ENTITY_TYPES.EVENT).forEach(function (v, k) { map.set(k, v); });
-  sync.recordsToMap(data.todos, sync.ENTITY_TYPES.TODO).forEach(function (v, k) { map.set(k, v); });
-  sync.recordsToMap(data.customers || [], sync.ENTITY_TYPES.CUSTOMER).forEach(function (v, k) { map.set(k, v); });
-  sync.recordsToMap(data.followups || [], sync.ENTITY_TYPES.FOLLOWUP).forEach(function (v, k) { map.set(k, v); });
+// 参与同步的实体（字段名 <-> 实体类型）。集中一处，避免推送/合并/校验三处各写一份而漏项。
+const SYNC_ENTITIES = [
+  { field: 'categories', type: sync.ENTITY_TYPES.CATEGORY },
+  { field: 'events', type: sync.ENTITY_TYPES.EVENT },
+  { field: 'todos', type: sync.ENTITY_TYPES.TODO },
+  { field: 'customers', type: sync.ENTITY_TYPES.CUSTOMER },
+  { field: 'followups', type: sync.ENTITY_TYPES.FOLLOWUP },
+];
 
+// 把远程变更 LWW 合并进本地数据（含软删除墓碑），并检测「本地修改被远程覆盖」的冲突。
+//
+// 返回值：true = 已采纳；false = **被护栏拦下、本地数据原样未动**。
+//
+// 护栏（为什么必须有）：同步是唯一能「删掉」本地数据的通道 —— 一旦合并逻辑有 bug
+// （例如记录缺 id 时挤到同一个 key、或某处漏了字段），用户的数据就会被静默抹掉。
+// 所以合并后先校验「记录数的减少是否能被抵达的墓碑解释」，解释不了就整批放弃。
+function applyRemoteChanges(changes) {
   // 合并前快照「本地已修改（localModifiedAt>0）」记录的指纹，合并后比对，
   // 若内容被远程版本替换即视为冲突（用户本地编辑被别的设备覆盖）。
   const dirty = new Map();
-  map.forEach(function (rec, key) {
-    if ((rec.localModifiedAt || 0) > 0 && !rec.deleted) {
-      dirty.set(key, { contentKey: recordContentKey(rec), title: rec.title || '' });
-    }
-  });
 
-  sync.mergeChanges(map, changes);
+  // 真正的合并与护栏都在 shared 里（同一份逻辑被单测覆盖，主进程不许另写一遍）
+  const result = sync.mergeWithGuardrail(data, SYNC_ENTITIES, changes, function (preMap) {
+    preMap.forEach(function (rec, key) {
+      if ((rec.localModifiedAt || 0) > 0 && !rec.deleted) {
+        dirty.set(key, { contentKey: recordContentKey(rec), title: rec.title || '' });
+      }
+    });
+  });
+  const map = result.map;
+
+  if (!result.ok) {
+    const violations = result.violations.map(function (v) {
+      const ent = SYNC_ENTITIES.filter(function (e) { return e.type === v.entityType; })[0];
+      return Object.assign({ field: (ent && ent.field) || v.entityType }, v);
+    });
+    console.error('[sync] ⚠ 检测到可疑的数据减少，已放弃本次合并以保护本地数据：' +
+      JSON.stringify(violations));
+    notifySyncAborted(violations);
+    return false;
+  }
+
   data.categories = sync.liveRecords(map, sync.ENTITY_TYPES.CATEGORY);
   data.events = sync.liveRecords(map, sync.ENTITY_TYPES.EVENT);
   data.todos = sync.liveRecords(map, sync.ENTITY_TYPES.TODO);
@@ -747,6 +770,14 @@ function applyRemoteChanges(changes) {
 
   if (conflicts.length > 0) {
     notifyConflict(conflicts);
+  }
+  return true;
+}
+
+// 同步被护栏拦下 → 通知界面（用户必须知道「同步没生效」而不是以为成功了）
+function notifySyncAborted(violations) {
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('sync-aborted', { violations: violations, at: Date.now() });
   }
 }
 
@@ -818,13 +849,36 @@ function notifyRendererRefresh() {
 
 async function syncPull() {
   if (!syncAuthed()) throw new Error('未配置同步服务器');
-  const json = await syncRequest('GET', '/api/sync?since=' + syncState.lastPulledAt);
-  applyRemoteChanges(json.changes || []);
-  if (json.serverTime != null) syncState.lastPulledAt = json.serverTime;
+
+  let pulled = 0;
+  let guard = 0;
+  for (;;) {
+    const json = await syncRequest('GET', '/api/sync?since=' + syncState.lastPulledAt);
+    const changes = json.changes || [];
+    if (changes.length) {
+      const ok = applyRemoteChanges(changes);
+      if (!ok) {
+        // 护栏拦下（数据可疑减少）→ 不推进游标，本地数据保持原样，等用户处理
+        persistData();
+        persistSyncState();
+        return { pulled: pulled, aborted: true };
+      }
+      pulled += changes.length;
+      // 游标推进到**本批最后一条的 updatedAt**（规则在 shared/sync.nextPullCursor，
+      // 有单测）。不能用 serverTime：分页拉取时它是服务端全局最新时间，
+      // 会让两页之间的记录被永久跳过（前端再也拉不到它们）。
+      syncState.lastPulledAt = sync.nextPullCursor(syncState.lastPulledAt, changes);
+    }
+    // 服务端还有更多 → 继续拉；返回空批也停，避免空转
+    if (!json.hasMore || changes.length === 0) break;
+    guard += 1;
+    if (guard >= 50) break; // 防御：服务端 hasMore 异常时不要无限循环
+  }
+
   persistData();
   persistSyncState();
   notifyRendererRefresh();
-  return { pulled: (json.changes || []).length };
+  return { pulled: pulled, aborted: false };
 }
 
 async function syncPush() {
@@ -877,13 +931,18 @@ function applyImported(parsed) {
   data.bookkeepingCategories = Array.isArray(parsed.bookkeepingCategories) ? parsed.bookkeepingCategories : [];
   data.budgets = Array.isArray(parsed.budgets) ? parsed.budgets : [];
   data.memorials = Array.isArray(parsed.memorials) ? parsed.memorials : [];
+  // 客户与跟进记录同样必须纳入导入/恢复（2.3.2 新增的集合）。
+  // 曾漏掉这两项：导入或恢复备份会**静默丢掉全部客户数据**。
+  data.customers = Array.isArray(parsed.customers) ? parsed.customers : [];
+  data.followups = Array.isArray(parsed.followups) ? parsed.followups : [];
   data.notified = {};
   data.snoozed = {};
   data.version = DATA_VERSION;
   // 导入/恢复的数据标记为「本地修改」，使下次同步能上传（否则 extractLocalChanges 会因
   // 缺少 localModifiedAt 而跳过，导致导入的数据永远停留在本地）。
   const now = Date.now();
-  [data.categories, data.events, data.todos].forEach(function (arr) {
+  // ⚠️ 这个列表必须覆盖所有「会参与同步」的集合，否则导入的数据不会上传。
+  [data.categories, data.events, data.todos, data.customers, data.followups].forEach(function (arr) {
     arr.forEach(function (r) {
       if (!r.updatedAt) r.updatedAt = now;
       r.localModifiedAt = now;

@@ -11,24 +11,98 @@
 | 结构 | 主进程 `main.js` + `preload.js`（项目根目录）；渲染层 `src/renderer/` |
 | 数据持久化 | `userData/data.json`，防抖保存 500ms，自动备份（最多 10 份） |
 | 仓库 | https://github.com/szyanghao-beep/schedule-manager.git（分支 `main`） |
-| 当前版本 | **v2.3.9** |
+| 当前版本 | **v2.4.0** |
 
 ---
 
-## 测试基线（v2.3.9）
+## 测试基线（v2.4.0）
 
 | 层 | 命令 | 结果 |
 |----|------|------|
-| 纯函数单测 + 跨文件契约 | `npm test` | **385 通过 / 0 失败**（v2.3.8 为 372） |
-| 渲染层 UI（jsdom） | `npm run test:ui` | **75 通过 / 0 失败** |
-| 真实 Electron 冒烟 | `npm run smoke` | **68 通过 / 0 失败**（v2.3.8 为 67） |
-| 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过** |
+| 纯函数单测 + 跨文件契约 | `npm test` | **408 通过 / 0 失败**（v2.3.9 为 385） |
+| 渲染层 UI（jsdom） | `npm run test:ui` | **80 通过 / 0 失败**（v2.3.9 为 75） |
+| 真实 Electron 冒烟 | `npm run smoke` | **68 通过 / 0 失败** |
+| **界面交付审计**（新增） | `npm run audit:ui` | **102 个界面状态 / 0 错误**（12 视图 × 4 窗口宽度 + 页签 + 弹窗 × 3 尺寸 + 截图 OCR 复检） |
+| 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过**（需先 `npm run dist:dir`；本次本地磁盘不足，由 CI 产物覆盖） |
 | **多账号管理** | `node server/verify-admin.js` | **74 通过 / 0 失败** |
 | 后端服务 / 端到端 / 收件箱直传 | `server/verify-server.js` 等 | **17 / 6 / 16 全通过** |
 
 ---
 
 ## 版本历史
+
+### v2.4.0 — 「多端同步把客户清空了」根因修复 + 全功能交付审计
+
+**用户反馈**：「多端同步之后客户被清空了，这个功能还需要详细测试一下；同时把所有功能
+再做一次交付测试，不要再出现 UI 设计问题或者这种同步的错误。」
+
+#### 1. 客户被清空的真正原因（不是同步算法的问题）
+
+渲染层保存时漏传字段：`store.js` 的 `scheduleSave()` 组装给主进程的 payload 里
+**只有日程/待办，没有 customers / followups**。链路是：
+
+```
+界面新增客户 → Store 里有了 → 500ms 防抖保存 → payload 漏字段 → 主进程 data.customers 仍是 []
+   → 下次同步以主进程的空数组为准 → persistData() 落盘 → 界面重载 → 客户列表空了
+```
+
+也就是说这些客户**从未落盘**（`git log -S` 显示该字段从来没进过 payload，v2.3.2 起就这样）。
+修复：
+- `store.js` 的保存 payload 补上 `customers` / `followups`；
+- `applyImported()`（导入/恢复数据）也补上这两个字段，不再静默丢弃；
+- `touch()` 给缺 id 的记录补 id（缺 id 会在同步合并时挤成同一个 key，一批记录只剩一条）；
+- `shared/sync.js` 的 `recordsToMap` 对缺 id 记录改用独立 key，宁可同步不了也不互相覆盖；
+- 新增**数据安全护栏** `mergeWithGuardrail`：同步是唯一能删掉本地数据的通道，
+  合并后若「记录减少」无法被本批墓碑解释，就整批放弃并通知界面
+  （`sync:aborted` → 提示「同步已中止以保护本地数据」），而不是照单全收。
+
+#### 2. 分页拉取会漏记录（同步的第二个真 bug）
+
+`syncPull` 原来把游标推进到服务端的 `serverTime`（服务端全局最新时间），
+而它是**分页**拉取的（limit 500 + hasMore）。第一页之后、serverTime 之前的记录会被
+永久跳过 —— 前端再也拉不到。现在游标只推进到**本批实际返回记录的最大 updatedAt**
+（`sync.nextPullCursor`，有单测 + 反证测试），并循环拉到 `hasMore` 为假。
+
+#### 3. 记账「合计里有钱、明细却是空的」
+
+明细列表用 `t.date >= from && t.date < to` 过滤，合计走 `monthlySummary`。
+界面写入的 `date` 是数字时间戳，但**导入的旧数据是 'YYYY-MM-DD' 字符串**；
+数字与字符串比较会被转成 NaN，两个条件结果相反 —— 合计把这条算进去，明细把它过滤掉。
+现在统一用 `shared/bookkeeping.js` 的 `txnTime/inRange` 归一化后比较，两条路径共用同一判定。
+
+#### 4. 全功能交付审计（把「UI 设计问题」变成可自动发现）
+
+新增 `npm run audit:ui`（`scripts/ui-audit.js`，真实 Electron + 真实渲染层）：
+
+- 4 种窗口宽度（1440/1200/1000/820）× 12 个视图，**并逐个点开页签**
+  （日程月/周/日、记账明细/账户/报表/预算、统计图/列表）与搜索有结果状态；
+- 每个状态检查：整页横向滚动、元素溢出右边界且无处可滚、`overflow:hidden` 裁掉内容、
+  nowrap 文字撑破容器、可点击元素过小、文字对比度过低；
+- **弹窗体检**（新增/编辑弹窗 × 3 种窗口尺寸，含 900×380 的矮窗口），
+  专查「底栏按钮被顶出窗口点不到」；
+- 截图存临时目录，并调用本机看图解析工具做 **OCR 复检**：文字重叠、贴边截断、
+  界面残留报错文案、视图是否真的渲染出内容（DOM 检查抓不到「没画出来」）。
+
+本轮它查出的真问题（已修）：
+- 弹窗关闭按钮只有 **12×20 px**，7 个弹窗全部命中「点不到」→ 改成 30×30 热区；
+- 次要文字对比度不足：`--success/--warning` 是给背景用的亮色，被当文字色用
+  （`已完成` 徽标 2.44、客户跟进提示 2.05）→ 新增文字安全色
+  `--success-text/--warning-text`，并把 `--muted` 从 #8a8f98 加深到 #6b7280；
+- 审计自身的三处误报也一并修掉：SVG 文字尺寸、可滚动容器内的元素、
+  Python OCR 输出的编码（Windows 下默认 GBK，会全变乱码导致关键词误判）。
+
+#### 5. 新增测试与工具
+
+- `test/sync-dataloss.test.js`：护栏单测 + **真实服务端往返**（A 建的客户 B 拉取后必须存在、
+  B 的编辑回到 A、墓碑删除生效、>limit 的分页一条不漏，并反证「用 serverTime 作游标会漏记录」）；
+- `test/field-coverage.test.js`：跨层字段覆盖契约（`defaultData`/`publicData`/`applyImported`/
+  `data:save`/`buildLocalChanges`/`applyRemoteChanges`/渲染层 `state`/`get()`/`saveData`），
+  行为级断言「界面加的客户真的进了保存 payload」；
+- `test/ui.bookkeeping.test.js`：字符串日期与数字日期结论必须一致、明细条数 == 纯函数条数；
+- `tools/negcheck.js`：**负向验证工具**（把逻辑改坏跑一遍，确认测试真的变红后自动还原）。
+  本轮对护栏、游标规则、缺 id 键、明细过滤、UI 审计的点击热区都做了负向验证。
+
+---
 
 ### v2.3.9 — 让同步地址不再依赖固定网段 / 固定主机
 

@@ -33,6 +33,7 @@ window.API = {
   syncLogout: function () { return window.api.syncLogout(); },
   onSyncDataUpdated: function (cb) { window.api.onSyncDataUpdated(cb); },
   onSyncConflict: function (cb) { window.api.onSyncConflict(cb); },
+  onSyncAborted: function (cb) { window.api.onSyncAborted(cb); },
   // 多账号管理（管理员专属接口；普通用户调用会收到「需要管理员权限」）
   adminOverview: function () { return window.api.adminOverview(); },
   adminListUsers: function () { return window.api.adminListUsers(); },
