@@ -390,26 +390,42 @@ function deleteFollowup(id) {
 }
 
 // ---------------- 同步 ----------------
-// 拉取结果合并：mergeChanges(LWW) + 推进 lastSyncAt + 清理已被服务端确认的 journal 条目。
-// 若某条本地变更服务端还没有（或时间更旧），保留在 journal 里等待下次重推。
+// 拉取结果合并：mergeChanges(LWW) + 推进 lastSyncAt + 清理「已被服务端版本取代」的 journal 条目。
+//
+// ★ 判据是「保留仍需推送的本地变更」，不是「保留更旧的」：
+//   合并后记录仍等于本地那一版（recordTime == ch.updatedAt）→ **说明服务端还没有这条**，
+//   必须留在 journal 里等下次重推；只有远端带来了更新的版本（recordTime > ch.updatedAt）
+//   才说明这条本地变更已被取代，可以丢掉。
+//   以前写成 `sync.recordTime(rec) < ch.updatedAt`，把「仍需推送」的条目判成了可丢，
+//   于是同步进行中/刚推送后又做的那笔修改会被静默丢掉，永远推不上服务器
+//   （表现：手机上改了东西，别的设备一直看不到）。
 function applyPull(changes, serverTime) {
   sync.mergeChanges(state.map, changes || []);
   if (serverTime != null && serverTime > state.lastSyncAt) state.lastSyncAt = serverTime;
   state.journal = state.journal.filter((ch) => {
     const rec = state.map.get(ch.entityType + ':' + ch.id);
-    return !rec || sync.recordTime(rec) < ch.updatedAt;
+    if (!rec) return true;                       // 记录不在了（被删）→ 变更还没确认，保留
+    return sync.recordTime(rec) <= ch.updatedAt; // 本地版本仍是最新 → 仍需推送，保留
   });
   notify();
 }
 
-// 推送成功后：删除 updatedAt <= serverTime 的条目（服务端已接受），
+// 推送成功后：把**本次真正推上去**的、且 updatedAt <= serverTime 的条目删掉（服务端已接受），
 // 并把对应本地记录时间采纳为服务器时间，避免本地时钟偏差破坏后续 LWW 仲裁。
 // 仅当记录未被更新的本地编辑覆盖时才改写（记录 updatedAt 与条目一致时）。
-function pruneJournalAfterPush(serverTime) {
+//
+// @param sent 本次推送提交的条目（默认取当前 journal）。
+//   为什么要传：推送期间用户可能又改了同一批数据（新的 journal 条目），
+//   若只按时间判断，这些**没被推上去**的新条目可能因为 updatedAt <= serverTime 被误删，
+//   那笔修改就永远推不上去了。按「本次提交过的条目」来删才安全。
+function pruneJournalAfterPush(serverTime, sent) {
   if (serverTime == null) return;
+  const batch = sent || state.journal;
+  const sentKeys = new Set(batch.map((ch) => ch.entityType + ':' + ch.id + '@' + ch.updatedAt));
   const removed = [];
   state.journal = state.journal.filter((ch) => {
-    if (ch.updatedAt <= serverTime) {
+    const key = ch.entityType + ':' + ch.id + '@' + ch.updatedAt;
+    if (sentKeys.has(key) && ch.updatedAt <= serverTime) {
       removed.push(ch);
       return false;
     }

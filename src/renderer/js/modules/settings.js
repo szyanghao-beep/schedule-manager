@@ -107,7 +107,10 @@ window.Modules.settings = (function () {
     const dataCard = el('div', 'card');
     dataCard.style.marginTop = '16px';
     dataCard.appendChild(el('div', 'panel-title', '数据管理'));
-    const desc = el('div', 'item-meta', '数据自动保存在本地，可随时导出备份，或从备份文件恢复。');
+    const desc = el('div', 'item-meta',
+      '数据自动保存在本地，可随时导出备份，或从备份文件恢复。' +
+      '每次多端同步之前还会自动留一份快照（备份目录下的 presync 子目录，保留最近 20 份），' +
+      '万一同步结果不对，可以用「从备份恢复」选那份快照回滚。');
     desc.style.margin = '8px 0';
     dataCard.appendChild(desc);
     const btnRow = el('div', 'toolbar');

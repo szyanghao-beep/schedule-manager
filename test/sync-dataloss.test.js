@@ -261,3 +261,46 @@ test('nextPullCursor：空批不推进游标，回退不倒退', function () {
   assert.strictEqual(sync.nextPullCursor(500, [{ updatedAt: 10 }]), 500, '比当前游标旧 → 不倒退');
   assert.strictEqual(sync.nextPullCursor(0, [{ updatedAt: 'x' }, null, {}]), 0, '脏数据不能让游标变 NaN');
 });
+
+// ---------------------------------------------------------------------------
+// 三、推送游标：推送在途时新做的修改不能被「吞掉」
+// ---------------------------------------------------------------------------
+
+test('★ maxLocalModifiedAt：只算本批（> since）里最大的 localModifiedAt', function () {
+  const recs = [
+    { id: 'a', localModifiedAt: 100 },   // 早于 since → 不属于本批（上一批已推过）
+    { id: 'b', localModifiedAt: 300 },   // 本批
+    { id: 'c', localModifiedAt: 200 },   // 本批
+    { id: 'd' },                          // 远程拉回来的记录没有 localModifiedAt → 不参与推送
+    { id: 'e', localModifiedAt: 'not-a-number' },
+  ];
+  assert.strictEqual(sync.maxLocalModifiedAt(recs, 150), 300);
+  assert.strictEqual(sync.maxLocalModifiedAt(recs, 0), 300);
+  assert.strictEqual(sync.maxLocalModifiedAt(recs, 300), 0, '没有 > since 的记录 → 0（调用方不推进游标）');
+  assert.strictEqual(sync.maxLocalModifiedAt([], 0), 0);
+  assert.strictEqual(sync.maxLocalModifiedAt([{ localModifiedAt: 50 }], 100), 0);
+});
+
+test('★ 推送游标不能用 Date.now()：推送在途时改的那一条必须还能推出去', function () {
+  // 时间轴：T1 = 第一次修改，Tpush = 推送完成的时刻，T2 = 推送进行中的第二次修改
+  const T1 = 1000, T2 = 1400, Tpush = 2000;
+  const records = [{ id: 'cu1', localModifiedAt: T1 }];
+
+  // 推送这一刻收集到的本批：只有 T1 那条（T2 还没发生）
+  const built = sync.extractLocalChanges(records, sync.ENTITY_TYPES.CUSTOMER, 0);
+  assert.strictEqual(built.length, 1);
+  const cursor = sync.maxLocalModifiedAt(records, 0);
+  assert.strictEqual(cursor, T1, '游标应停在本批最大 localModifiedAt');
+
+  // 推送在途时用户又改了同一条
+  records[0] = { id: 'cu1', localModifiedAt: T2 };
+
+  // 下一批（用新游标）必须能捞到 T2 那一次修改
+  const next = sync.extractLocalChanges(records, sync.ENTITY_TYPES.CUSTOMER, cursor);
+  assert.strictEqual(next.length, 1, 'T2 的修改必须还在下一批里（否则永远推不上去）');
+
+  // 反证：若按「推送完成时刻」推进游标（以前的实现），T2 就被吞掉了
+  const buggyNext = sync.extractLocalChanges(records, sync.ENTITY_TYPES.CUSTOMER, Tpush);
+  assert.strictEqual(buggyNext.length, 0,
+    '用 Date.now()/' + Tpush + ' 作游标会把 T2 的修改当成"已推送"而永远丢掉 —— 这就是要修的点');
+});

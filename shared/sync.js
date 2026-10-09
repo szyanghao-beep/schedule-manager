@@ -165,10 +165,31 @@ function detectSuspiciousLoss(beforeByType, afterByType, changes) {
 // @param localByField 本地数据对象（含各实体字段，如 data.categories / data.customers）
 // @param entities     [{ field: 'customers', type: 'customer' }, ...]
 // @param changes      远程变更
-// @param onBeforeMerge 可选回调，在合并**之前**拿到初始 map（用于快照本地已修改记录）
-// @returns { ok, map, beforeByType, afterByType, violations }
+// @param opts         { onBeforeMerge?: (map) => void,  合并前回调（快照本地已修改记录）
+//                       allowTypes?: string[] }          额外允许合并的实体类型（如 setting，
+//                                                        它不是数组集合，单独同步）
+// @returns { ok, map, beforeByType, afterByType, violations, ignoredChanges, ignoredTypes }
 //          ok=false 时**不要**采用 map —— 调用方应放弃这一批，保住本地数据。
-function mergeWithGuardrail(localByField, entities, changes, onBeforeMerge) {
+//
+// 边界（重要）：只有本端**认识**的实体类型才会被合并。不认识的类型一律忽略并计数上报。
+// 理由：mergeChanges 是"照单全收"的，而远端可能来自另一个版本/别的实现，
+// 甚至可能是脏数据。把不认识的东西放进合并结果，等于给"本端不处理的数据"开了个口子
+// （记账/纪念日就在白名单之外，绝不能被对端的一次误删指令带走）。
+function mergeWithGuardrail(localByField, entities, changes, opts) {
+  opts = opts || {};
+  const onBeforeMerge = typeof opts.onBeforeMerge === 'function' ? opts.onBeforeMerge : null;
+  const allowed = {};
+  (entities || []).forEach(function (e) { allowed[e.type] = true; });
+  (opts.allowTypes || []).forEach(function (t) { allowed[t] = true; });
+
+  const ignoredTypes = {};
+  const accepted = (changes || []).filter(function (ch) {
+    if (!ch || !ch.entityType) return true; // 非法 change 交给 mergeChanges 自己跳过
+    if (allowed[ch.entityType]) return true;
+    ignoredTypes[ch.entityType] = (ignoredTypes[ch.entityType] || 0) + 1;
+    return false;
+  });
+
   const map = new Map();
   (entities || []).forEach(function (e) {
     recordsToMap((localByField || {})[e.field] || [], e.type).forEach(function (v, k) { map.set(k, v); });
@@ -181,22 +202,24 @@ function mergeWithGuardrail(localByField, entities, changes, onBeforeMerge) {
     }).length;
   });
 
-  if (typeof onBeforeMerge === 'function') onBeforeMerge(map);
+  if (onBeforeMerge) onBeforeMerge(map);
 
-  mergeChanges(map, changes);
+  mergeChanges(map, accepted);
 
   const afterByType = {};
   (entities || []).forEach(function (e) {
     afterByType[e.type] = liveRecords(map, e.type).length;
   });
 
-  const violations = detectSuspiciousLoss(beforeByType, afterByType, changes);
+  const violations = detectSuspiciousLoss(beforeByType, afterByType, accepted);
   return {
     ok: violations.length === 0,
     map: map,
     beforeByType: beforeByType,
     afterByType: afterByType,
     violations: violations,
+    ignoredChanges: (changes || []).length - accepted.length,
+    ignoredTypes: Object.keys(ignoredTypes),
   };
 }
 
@@ -215,6 +238,25 @@ function nextPullCursor(currentCursor, changes) {
   return maxT > cur ? maxT : cur;
 }
 
+// 推送游标的推进规则：只能推进到「本批真正推上去的变更」里最大的 localModifiedAt。
+//
+// 修 bug：以前推送成功后直接把游标设成 Date.now()。推送期间用户可能又改了一条
+// （时间戳比推送完成时刻早），那条修改就再也满足不了 `localModifiedAt > 游标`，
+// **永远推不上去**（别的设备一直看不到这笔改动）。窗口虽小，但真实存在：
+// 网络慢、数据量大时更容易命中。
+//
+// 返回本批（localModifiedAt > since 的记录）里最大的 localModifiedAt；
+// 没有符合条件的记录时返回 0（调用方据此决定不推进游标）。
+function maxLocalModifiedAt(records, sinceTs) {
+  const since = Number(sinceTs) || 0;
+  let max = 0;
+  (records || []).forEach(function (r) {
+    const t = Number(r && r.localModifiedAt) || 0;
+    if (t > since && t > max) max = t;
+  });
+  return max;
+}
+
 module.exports = {
   ENTITY_TYPES: ENTITY_TYPES,
   recordTime: recordTime,
@@ -229,4 +271,5 @@ module.exports = {
   detectSuspiciousLoss: detectSuspiciousLoss,
   mergeWithGuardrail: mergeWithGuardrail,
   nextPullCursor: nextPullCursor,
+  maxLocalModifiedAt: maxLocalModifiedAt,
 };

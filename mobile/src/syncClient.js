@@ -48,7 +48,8 @@ async function syncNow() {
     const journal = store.getJournal();
     if (journal.length > 0) {
       const pushRes = await api.push(base, token, journal);
-      store.pruneJournalAfterPush(pushRes.serverTime);
+      // 传本次提交的 journal：推送期间新产生的本地修改不能被误删（否则永远推不上去）
+      store.pruneJournalAfterPush(pushRes.serverTime, journal);
     }
 
     // 2) 增量拉取（首次 lastSyncAt=0 即全量）

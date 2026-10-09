@@ -535,29 +535,66 @@ async function main() {
     }
   }
 
-  // 截图：DOM 检查抓不到「难看」，留下来人工复看
-  console.log('\n== 截图（1200×820，存 ' + shotDir + '）==');
+  // 截图：DOM 检查抓不到「难看」，留下来人工复看。
+  // 两种尺寸都截：标准窗口看整体观感，窄窗口最容易出现文字截断/贴边。
   const shots = [];
-  // 截图前把窗口调回标准尺寸：弹窗体检测试会把窗口改小，
-  // 小窗口下内容贴边/滚动会让 OCR 的「贴边」判定产生噪音
-  win.setContentSize(1200, HEIGHT);
-  await new Promise(function (r) { setTimeout(r, 400); });
-  for (const v of VIEWS) {
-    const active = await js('window.__UA.open(' + JSON.stringify(v) + ')');
-    // 等两帧再截，否则 capturePage 可能拿到上一帧（会拍到上一个视图的画面，
-    // 直接导致 OCR 复检张冠李戴）
-    await js('new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); })');
-    await new Promise(function (r) { setTimeout(r, 200); });
-    if (active !== 'view-' + v) {
-      console.log('  ⚠ ' + v + ' 截图前未能切换到该视图（当前 ' + active + '）');
-      errors++;
+  for (const size of [{ w: 1200, h: HEIGHT, tag: 'w1200' }, { w: 820, h: 700, tag: 'w820' }]) {
+    console.log('\n== 截图（' + size.w + '×' + size.h + '，存 ' + shotDir + '）==');
+    win.setContentSize(size.w, size.h);
+    await new Promise(function (r) { setTimeout(r, 400); });
+    for (const v of VIEWS) {
+      const active = await js('window.__UA.open(' + JSON.stringify(v) + ')');
+      // 等两帧再截，否则 capturePage 可能拿到上一帧（会拍到上一个视图的画面，
+      // 直接导致 OCR 复检张冠李戴）
+      await js('new Promise(function(r){ requestAnimationFrame(function(){ requestAnimationFrame(r); }); })');
+      await new Promise(function (r) { setTimeout(r, 200); });
+      if (active !== 'view-' + v) {
+        console.log('  ⚠ ' + v + ' 截图前未能切换到该视图（当前 ' + active + '）');
+        errors++;
+      }
+      const img = await win.webContents.capturePage();
+      const p = path.join(shotDir, size.tag + '-' + v + '.png');
+      fs.writeFileSync(p, img.toPNG());
+      shots.push({ view: v + '@' + size.tag, file: p });
     }
-    const img = await win.webContents.capturePage();
-    const p = path.join(shotDir, 'w1200-' + v + '.png');
-    fs.writeFileSync(p, img.toPNG());
-    shots.push({ view: v, file: p });
+    console.log('  共 ' + VIEWS.length + ' 张');
   }
-  console.log('  共 ' + shots.length + ' 张');
+
+  // 报错提示可读性：错误提示是用户唯一的「出事了」信号，
+  // 必须看得清（对比度）、不被裁掉、不出窗口 —— 直接渲染四种提示再量一遍。
+  console.log('\n== 报错/提示可读性（toast）==');
+  win.setContentSize(1000, HEIGHT);
+  await new Promise(function (r) { setTimeout(r, 300); });
+  for (const kind of ['error', 'warning', 'success', 'info']) {
+    const r = await js(`(function () {
+      const t = window.Toast;
+      window.__t = null;
+      const fn = { error: 'error', warning: 'warning', success: 'success', info: 'info' }[${JSON.stringify(kind)}];
+      t[fn]('这是一条较长的提示文案，用来检验提示条在窄窗口下会不会被裁掉、颜色是否看得清');
+      const el = document.querySelector('#toast-root > *');
+      if (!el) return { missing: true };
+      const st = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      const cs = getComputedStyle(el);
+      return {
+        color: cs.color, bg: cs.backgroundColor,
+        w: Math.round(rect.width), h: Math.round(rect.height),
+        right: Math.round(rect.right), bottom: Math.round(rect.bottom),
+        clippedX: el.scrollWidth > el.clientWidth + 4,
+        winW: window.innerWidth, winH: window.innerHeight,
+        fontSize: parseFloat(cs.fontSize),
+      };
+    })()`);
+    if (r.missing) { console.log('  ✘ ' + kind + ' 提示没有渲染出来（用户看不到提示）'); errors++; continue; }
+    const bad = r.clippedX || r.right > r.winW + 1 || r.bottom > r.winH + 1 || r.fontSize < 11;
+    if (bad) errors++;
+    console.log('  ' + (bad ? '✘' : '✔') + ' ' + kind.padEnd(8) +
+      ' 尺寸 ' + r.w + '×' + r.h + ' 字号 ' + r.fontSize +
+      (r.clippedX ? '  ⚠ 文字被裁掉' : '') +
+      (r.right > r.winW + 1 || r.bottom > r.winH + 1 ? '  ⚠ 超出窗口' : ''));
+    await js('window.Toast && document.getElementById("toast-root") && (document.getElementById("toast-root").innerHTML = ""); true');
+    await new Promise(function (r2) { setTimeout(r2, 120); });
+  }
 
   // 截图 OCR 复检：DOM 看不到的问题（文字重叠、贴边被裁、报错文案留在界面上）
   // 用本机「看图解析工具」做，工具不存在时跳过（不让审计因此失败）
@@ -572,8 +609,18 @@ async function main() {
       'out = []',
       'for item in json.loads(sys.argv[1]):',
       '    r = ui_analyzer.analyze(item["file"])',
+      '    W = r["meta"]["width"]; H = r["meta"]["height"]',
+      '    def edge(b):',
+      '        x0, y0, x1, y1 = b["bbox"]',
+      '        es = []',
+      '        if x0 <= 3: es.append("left")',
+      '        if x1 >= W - 3: es.append("right")',
+      '        if y0 <= 3: es.append("top")',
+      '        if y1 >= H - 3: es.append("bottom")',
+      '        return es',
       '    out.append({"view": item["view"], "n": r["text_count"],',
-      '                "overlaps": len(r["overlaps"]), "trunc": len(r["truncated"]),',
+      '                "overlaps": len(r["overlaps"]),',
+      '                "trunc": [{"text": b["text"], "edges": edge(b)} for b in r["truncated"]],',
       '                "errs": r["error_messages"][:4], "text": r["full_text"][:400]})',
       'print(json.dumps(out, ensure_ascii=False))',
     ].join('\n');
@@ -600,12 +647,26 @@ async function main() {
           // 按长度过滤掉，避免把正常文案当成报错
           return e.length <= 40 && /失败|错误|无法|异常|崩溃|Error|Exception|invalid/i.test(e);
         });
-        const bad = o.overlaps > 0 || o.trunc > 0 || realErrs.length > 0 || o.n < 3;
+        // 贴边要分方向看：
+        //   左右贴边 = 文字被窗口横向截断（内容比窗口宽）→ 真问题；
+        //   上下贴边 = 列表还能滚动（内容本来就会顶到视口边缘）→ 正常，只记一笔。
+        const trunc = o.trunc || [];
+        const sideClipped = trunc.filter(function (t) {
+          return t.edges.indexOf('left') >= 0 || t.edges.indexOf('right') >= 0;
+        });
+        const vertical = trunc.filter(function (t) {
+          return t.edges.indexOf('left') < 0 && t.edges.indexOf('right') < 0;
+        });
+        const bad = o.overlaps > 0 || sideClipped.length > 0 || realErrs.length > 0 || o.n < 3;
         if (bad) errors++;
-        console.log('  ' + (bad ? '✘' : '✔') + ' ' + o.view.padEnd(12) +
+        console.log('  ' + (bad ? '✘' : '✔') + ' ' + o.view.padEnd(14) +
           ' 文字块 ' + String(o.n).padStart(3) +
-          '  重叠 ' + o.overlaps + '  贴边 ' + o.trunc +
+          '  重叠 ' + o.overlaps + '  横向截断 ' + sideClipped.length +
+          (vertical.length ? '（另有 ' + vertical.length + ' 处纵向贴边=可滚动，正常）' : '') +
           (realErrs.length ? '  ⚠ 界面残留报错: ' + realErrs.join(' / ') : ''));
+        sideClipped.slice(0, 3).forEach(function (t) {
+          console.log('        · 被窗口横向截断的文字：' + JSON.stringify(t.text) + '（贴 ' + t.edges.join('+') + '）');
+        });
         if (o.n < 3) console.log('        ⚠ 几乎没有文字，视图可能是空白的');
       });
       // 关键内容是否真的画出来了（防「页面渲染了但数据没显示」）
@@ -614,7 +675,8 @@ async function main() {
         schedule: '日程', todo: '待办', stats: '统计', settings: '设置',
       };
       ocr.forEach(function (o) {
-        const want = expect[o.view];
+        const view = String(o.view).split('@')[0];
+        const want = expect[view];
         if (want && o.text.indexOf(want) < 0) {
           console.log('  ✘ ' + o.view + ' 截图上找不到关键词「' + want + '」，界面可能没渲染出内容');
           errors++;

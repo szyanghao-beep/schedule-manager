@@ -124,7 +124,8 @@ window.App = (function () {
       const v = (payload && payload.violations) || [];
       const names = v.map(function (x) { return x.field + '（' + x.before + ' → ' + x.after + '）'; }).join('、');
       Toast.error('同步已中止以保护本地数据：本次合并会让 ' + names +
-        ' 条记录无故消失（而非被删除）。本地数据未被改动，请把这条提示反馈给开发者。');
+        ' 条记录无故消失（而非被删除）。本地数据未被改动，同步前的快照已留在 ' +
+        ((payload && payload.snapshot) || 'backup/presync') + '，可随时从「设置 → 数据 → 从备份恢复」找回。');
     });
 
     // 本机局域网地址变了（换网络/换主机）-> 提示更新其它设备上填的地址，

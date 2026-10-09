@@ -28,6 +28,8 @@ if (process.env.SCHEDULE_USER_DATA_DIR) {
 const DATA_FILE = 'data.json';
 const BACKUP_DIR = 'backup';
 const MAX_BACKUPS = 10;
+const PRESYNC_DIR = 'presync';   // 同步前快照（单独目录 + 单独轮换，避免被日常备份挤掉）
+const MAX_PRESYNC = 20;
 const REMINDER_INTERVAL = 30 * 1000; // 每 30s 扫描一次提醒
 const SYNC_STATE_FILE = 'sync-state.json'; // 同步登录态与游标（独立于 data.json）
 const EMAIL_SECRET_FILE = 'email-secret.json'; // SMTP 密码（safeStorage 加密，独立于 data.json）
@@ -144,15 +146,54 @@ function backupData() {
     if (!fs.existsSync(dataFilePath())) return; // 首次保存无需备份
     const bdir = backupDir();
     if (!fs.existsSync(bdir)) fs.mkdirSync(bdir, { recursive: true });
-    const stamp = Utils.toDateStr(Date.now()).replace(/-/g, '') + '-' + Utils.toTimeStr(Date.now()).replace(/:/g, '');
-    fs.copyFileSync(dataFilePath(), path.join(bdir, 'data-' + stamp + '.json'));
+    fs.copyFileSync(dataFilePath(), path.join(bdir, 'data-' + backupStamp() + '.json'));
     // 只保留最近 MAX_BACKUPS 份
-    const files = fs.readdirSync(bdir).filter(function (f) { return f.endsWith('.json'); }).sort();
+    const files = fs.readdirSync(bdir).filter(function (f) {
+      return f.endsWith('.json') && f.indexOf('data-') === 0;
+    }).sort();
     while (files.length > MAX_BACKUPS) {
       fs.unlinkSync(path.join(bdir, files.shift()));
     }
   } catch (e) {
     console.error('备份失败', e);
+  }
+}
+
+// 备份文件名时间戳：精确到秒 + 毫秒尾数
+// 只精确到分钟时，同一分钟内的多次保存会**互相覆盖**同一个备份文件
+// （同步紧接着一次编辑时，就可能把「编辑前」的那份覆盖掉，回滚点丢失）。
+function backupStamp() {
+  const d = new Date();
+  const p = function (n, w) { return String(n).padStart(w || 2, '0'); };
+  return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '-' +
+    p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + '-' + p(d.getMilliseconds(), 3);
+}
+
+// 同步前快照：**每次真正发起同步之前**先把当前 data.json 原样存一份。
+//
+// 为什么单独做（而不是只靠 persistData 里的备份）：
+//   1. persistData 的备份是「写盘前顺手存一份」，写盘时机很多（每次编辑都会触发），
+//      10 份轮换很容易把「同步前那一刻」的状态挤掉；同步是唯一能删数据的操作，
+//      它的回滚点必须独立保留。
+//   2. 同步失败/被护栏拦下时，用户最需要的就是「同步前那一份」。
+// 单独目录 + 单独轮换（20 份），所以不会被日常备份挤掉。
+function snapshotBeforeSync(reason) {
+  try {
+    const src = dataFilePath();
+    if (!fs.existsSync(src)) return null; // 还没落过盘，没什么可快照
+    const dir = path.join(backupDir(), PRESYNC_DIR);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const name = 'presync-' + backupStamp() + (reason ? '-' + reason : '') + '.json';
+    const dest = path.join(dir, name);
+    fs.copyFileSync(src, dest);
+    const files = fs.readdirSync(dir).filter(function (f) { return f.endsWith('.json'); }).sort();
+    while (files.length > MAX_PRESYNC) {
+      fs.unlinkSync(path.join(dir, files.shift()));
+    }
+    return dest;
+  } catch (e) {
+    console.error('同步前快照失败', e);
+    return null;
   }
 }
 
@@ -685,7 +726,19 @@ function buildLocalChanges(since) {
       },
     });
   }
-  return changes;
+  // 本批的推送游标 = 这批记录里最大的 localModifiedAt（见 sync.maxLocalModifiedAt）。
+  // 推送成功后游标只能推进到这里，不能推到 Date.now()：推送在途时用户又改的那一条，
+  // 时间戳比「推送完成时刻」早，用 Date.now() 会让它永远推不上去（别的设备看不到）。
+  let cursor = 0;
+  SYNC_ENTITIES.forEach(function (e) {
+    const t = sync.maxLocalModifiedAt(data[e.field] || [], since);
+    if (t > cursor) cursor = t;
+  });
+  if (data.settingsMeta) {
+    const st = Number(data.settingsMeta.localModifiedAt) || 0;
+    if (st > since && st > cursor) cursor = st;
+  }
+  return { changes: changes, cursor: cursor };
 }
 
 // 记录业务内容指纹（忽略同步元字段），用于判断「本地修改是否被远程内容替换」
@@ -720,15 +773,27 @@ function applyRemoteChanges(changes) {
   // 若内容被远程版本替换即视为冲突（用户本地编辑被别的设备覆盖）。
   const dirty = new Map();
 
-  // 真正的合并与护栏都在 shared 里（同一份逻辑被单测覆盖，主进程不许另写一遍）
-  const result = sync.mergeWithGuardrail(data, SYNC_ENTITIES, changes, function (preMap) {
-    preMap.forEach(function (rec, key) {
-      if ((rec.localModifiedAt || 0) > 0 && !rec.deleted) {
-        dirty.set(key, { contentKey: recordContentKey(rec), title: rec.title || '' });
-      }
-    });
+  // 真正的合并与护栏都在 shared 里（同一份逻辑被单测覆盖，主进程不许另写一遍）。
+  // allowTypes 里带上 setting：它不是数组集合（是个对象），所以不在 SYNC_ENTITIES 里，
+  // 但确实要靠同步在两个端之间传（紧急阈值等），见下面的 settings 合并分支。
+  const result = sync.mergeWithGuardrail(data, SYNC_ENTITIES, changes, {
+    allowTypes: [sync.ENTITY_TYPES.SETTING],
+    onBeforeMerge: function (preMap) {
+      preMap.forEach(function (rec, key) {
+        if ((rec.localModifiedAt || 0) > 0 && !rec.deleted) {
+          dirty.set(key, { contentKey: recordContentKey(rec), title: rec.title || '' });
+        }
+      });
+    },
   });
   const map = result.map;
+
+  if (result.ignoredChanges > 0) {
+    // 本端不认识的实体类型：忽略但必须留痕（可能是另一个版本/别的实现推来的，
+    // 也可能是脏数据 —— 静默忽略会让问题查不出来）
+    console.warn('[sync] 忽略了 ' + result.ignoredChanges + ' 条本端不处理的实体变更：' +
+      result.ignoredTypes.join(', '));
+  }
 
   if (!result.ok) {
     const violations = result.violations.map(function (v) {
@@ -777,7 +842,12 @@ function applyRemoteChanges(changes) {
 // 同步被护栏拦下 → 通知界面（用户必须知道「同步没生效」而不是以为成功了）
 function notifySyncAborted(violations) {
   if (mainWindow && mainWindow.webContents) {
-    mainWindow.webContents.send('sync-aborted', { violations: violations, at: Date.now() });
+    mainWindow.webContents.send('sync-aborted', {
+      violations: violations,
+      at: Date.now(),
+      // 一并告诉用户快照在哪：同步被拦下时最需要的就是「同步前那一份」
+      snapshot: path.join(backupDir(), PRESYNC_DIR),
+    });
   }
 }
 
@@ -850,6 +920,11 @@ function notifyRendererRefresh() {
 async function syncPull() {
   if (!syncAuthed()) throw new Error('未配置同步服务器');
 
+  // ★ 快照放在这里（而不是 syncNow 里）：合并远程变更 = 唯一能删掉本地数据的动作，
+  //   而能走到合并的入口不止一个（立即同步、渲染层单独调 sync:pull、启动自动同步）。
+  //   放在真正的合并入口上，任何入口都绕不过它。
+  snapshotBeforeSync('pull');
+
   let pulled = 0;
   let guard = 0;
   for (;;) {
@@ -883,11 +958,15 @@ async function syncPull() {
 
 async function syncPush() {
   if (!syncAuthed()) throw new Error('未配置同步服务器');
-  const changes = buildLocalChanges(syncState.lastPushedAt);
+  const built = buildLocalChanges(syncState.lastPushedAt);
+  const changes = built.changes;
   if (changes.length > 0) {
     await syncRequest('POST', '/api/sync', { changes: changes });
+    // 游标只推进到本批真正推上去的最大 localModifiedAt（**不是** Date.now()）：
+    // 推送在途时用户又改的条目时间戳更早，用 Date.now() 会把它标成"已推送"，
+    // 那笔修改就永远同步不出去了。
+    if (built.cursor > syncState.lastPushedAt) syncState.lastPushedAt = built.cursor;
   }
-  syncState.lastPushedAt = Date.now();
   persistSyncState();
   return { pushed: changes.length };
 }
