@@ -24,7 +24,7 @@ import { useSyncExternalStore } from 'react';
 import store from '../store';
 import inboxDrop from '../inboxDrop';
 import formats from '../formats';
-import { findPc } from '../findPc';
+import { findPc, testConnection } from '../findPc';
 
 export default function CollectScreen() {
   useSyncExternalStore(store.subscribe, store.getSnapshot);
@@ -36,6 +36,7 @@ export default function CollectScreen() {
   const [code, setCode] = useState(cfg0.code);
   const [busy, setBusy] = useState(false);
   const [scanning, setScanning] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [status, setStatus] = useState('');
 
   const items = store.getLocalInbox();
@@ -168,6 +169,26 @@ export default function CollectScreen() {
             }}
           >
             <Text style={styles.scanBtnText}>{scanning ? '查找中…' : '🔍 自动查找电脑'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.scanBtn}
+            disabled={testing}
+            onPress={async () => {
+              // 「测试连接」把「连不上」与「这个地址上不是本程序」分开说清楚 ——
+              // 否则用户只看到 Network request failed，完全不知道该改什么。
+              setTesting(true);
+              setStatus('正在测试连接…');
+              try {
+                const r = await testConnection(url);
+                setStatus((r.ok ? '✅ ' : '❌ ') + r.message);
+              } catch (e) {
+                setStatus('测试失败：' + (e && e.message ? e.message : e));
+              } finally {
+                setTesting(false);
+              }
+            }}
+          >
+            <Text style={styles.scanBtnText}>{testing ? '测试中…' : '测试连接'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.saveBtn} onPress={saveConfig}>
             <Text style={styles.saveBtnText}>保存设置</Text>

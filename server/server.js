@@ -48,7 +48,7 @@ function resolveSecret() {
 const SECRET = resolveSecret();
 
 const db = createDb(DB_PATH);
-const app = createApp(db, SECRET);
+const app = createApp(db, SECRET, { version: (require('./package.json').version || '') });
 
 app.listen(PORT, '0.0.0.0', function () {
   console.log('日程管理同步服务已启动');

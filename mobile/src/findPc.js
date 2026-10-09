@@ -110,4 +110,39 @@ async function findPc(opts) {
   return { url: null, reason: 'not-found', scanned: scanned, total: total };
 }
 
-module.exports = { findPc, probe, DEFAULT_PORT };
+/**
+ * 测试某个地址是否可用，并给出**能直接照着做的**结论。
+ *
+ * 为什么单独做这个：手机上报「Network request failed」时，用户完全不知道
+ * 是地址写错了、电脑没开服务、还是不在同一个 WiFi。
+ * （真实案例：用户把手机自己的 IP 192.168.0.104 填成了电脑地址。）
+ */
+async function testConnection(url, timeoutMs) {
+  const normalized = shared.utils.normalizeServerUrl(url);
+  if (!normalized) {
+    return { ok: false, kind: 'empty', message: '请先填写电脑端地址，或点「🔍 自动查找电脑」' };
+  }
+  const r = await probe(normalized, timeoutMs || 3000);
+  if (r.ok) {
+    return {
+      ok: true, kind: 'ok', version: r.version || '',
+      message: '已连通电脑' + (r.version ? '（版本 ' + r.version + '）' : ''),
+    };
+  }
+  if (r.wrongApp) {
+    return {
+      ok: false, kind: 'wrong-app',
+      message: '这个地址上不是本程序的同步服务。请确认填的是运行「日程管理」的那台电脑。',
+    };
+  }
+  return {
+    ok: false, kind: 'unreachable',
+    message: '连不上 ' + normalized + '。常见原因：' +
+      '① 电脑上的「本机同步服务」没启用；' +
+      '② 手机与电脑不在同一个 WiFi；' +
+      '③ **电脑换过网络，IP 变了**（换电脑/换路由器后地址会变）——' +
+      '可以先点「🔍 自动查找电脑」，或到电脑「设置 → 本机同步服务」看当前地址。',
+  };
+}
+
+module.exports = { findPc, probe, testConnection, DEFAULT_PORT };

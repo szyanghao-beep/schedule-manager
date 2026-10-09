@@ -1049,6 +1049,9 @@ function startSyncServer() {
     const serverApp = createApp(syncServerDb, resolveSyncServerSecret(), {
       pairingCode: derivePairingCode(resolveSyncServerSecret()),
       onInboxDrop: handleInboxDrop, // 手机端局域网收集直传 → 直接并入本机收件箱
+      // /health 里带上版本：多台电脑都装了本程序时，
+      // 能一眼看出「哪台跑的是哪一版」，排查问题不用猜（此前该字段一直是空的）
+      version: app.getVersion(),
     });
     syncServer = serverApp.listen(syncServerState.port, '0.0.0.0', function () {
       syncServerState.running = true;

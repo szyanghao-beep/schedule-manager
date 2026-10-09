@@ -20,7 +20,7 @@ import {
 import api from '../api';
 import store from '../store';
 import syncClient from '../syncClient';
-import { findPc } from '../findPc';
+import { findPc, testConnection } from '../findPc';
 
 export default function LoginScreen({ navigation }) {
   // 预填上次用过的地址（退出登录不再清空），避免每次手输电脑 IP
@@ -31,6 +31,7 @@ export default function LoginScreen({ navigation }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [scanning, setScanning] = useState(false);
+  const [testing, setTesting] = useState(false);
   const [scanHint, setScanHint] = useState('');
 
   async function submit() {
@@ -115,6 +116,25 @@ export default function LoginScreen({ navigation }) {
           }}
         >
           <Text style={styles.scanBtnText}>{scanning ? '查找中…' : '🔍 自动查找电脑'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.scanBtn}
+          disabled={testing}
+          onPress={async () => {
+            // 把「连不上」与「这个地址上不是本程序」分开说清楚
+            setTesting(true);
+            setScanHint('正在测试连接…');
+            try {
+              const r = await testConnection(serverUrl || store.getServerUrl());
+              setScanHint((r.ok ? '✅ ' : '❌ ') + r.message);
+            } catch (e) {
+              setScanHint('测试失败：' + (e && e.message ? e.message : e));
+            } finally {
+              setTesting(false);
+            }
+          }}
+        >
+          <Text style={styles.scanBtnText}>{testing ? '测试中…' : '测试连接'}</Text>
         </TouchableOpacity>
         {scanHint ? <Text style={styles.hint}>{scanHint}</Text> : null}
 

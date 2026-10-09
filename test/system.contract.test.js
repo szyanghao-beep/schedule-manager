@@ -179,3 +179,41 @@ test('内嵌同步服务器的必需模块都能被主进程 require', function 
   assert.strictEqual(typeof createDb, 'function');
   assert.strictEqual(typeof derivePairingCode, 'function');
 });
+
+test('契约：/health 必须带出应用标识与版本（多台电脑时能分辨各自跑的是哪一版）', function () {
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = path.join(__dirname, '..');
+  const read = function (p) { return fs.readFileSync(path.join(ROOT, p), 'utf-8'); };
+
+  const appSrc = read('server/src/app.js');
+  assert.ok(/app:\s*'schedule-manager'/.test(appSrc),
+    '/health 必须带 app 标识 —— 手机端「自动查找电脑」靠它确认「这就是我们的服务」');
+  assert.ok(/version:/.test(appSrc), '/health 必须带 version 字段');
+
+  // 两个入口都必须把版本传进 createApp，否则字段永远是空的
+  // （曾漏传一次：两台电脑都返回空版本号，排查时分不清谁跑的是哪一版）
+  const mainSrc = read('main.js');
+  assert.ok(/createApp\([\s\S]{0,400}?version:\s*app\.getVersion\(\)/.test(mainSrc),
+    'main.js 调用 createApp 时必须传 version: app.getVersion()');
+  const serverSrc = read('server/server.js');
+  assert.ok(/createApp\([\s\S]{0,300}?version:/.test(serverSrc),
+    'server/server.js 调用 createApp 时必须传 version');
+});
+
+test('契约：手机端必须能「测试连接」并区分连不上 / 装错地址', function () {
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = path.join(__dirname, '..');
+  const read = function (p) { return fs.readFileSync(path.join(ROOT, p), 'utf-8'); };
+
+  const findPc = read('mobile/src/findPc.js');
+  assert.ok(/async function testConnection/.test(findPc), 'findPc 应导出 testConnection');
+  assert.ok(/wrong-app/.test(findPc), '应能区分「这个地址上不是本程序」与「连不上」');
+  assert.ok(/换过网络，IP 变了/.test(findPc), '连不上时应提示「地址可能变了」这一最常见原因');
+
+  ['mobile/src/screens/CollectScreen.js', 'mobile/src/screens/LoginScreen.js'].forEach(function (f) {
+    const src = read(f);
+    assert.ok(/testConnection/.test(src) && /测试连接/.test(src), f + ' 应提供「测试连接」按钮');
+  });
+});
