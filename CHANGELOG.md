@@ -23,6 +23,7 @@
 | 渲染层 UI（jsdom） | `npm run test:ui` | **80 通过 / 0 失败**（v2.3.9 为 75） |
 | 真实 Electron 冒烟 | `npm run smoke` | **68 通过 / 0 失败** |
 | **界面交付审计**（新增） | `npm run audit:ui` | **102 个界面状态 / 0 错误**（12 视图 × 4 窗口宽度 + 页签 + 弹窗 × 3 尺寸 + 截图 OCR 复检） |
+| **端到端同步**（新增） | `npm run e2e:sync` | **17 通过 / 0 失败**（真实 Electron + 真实后端 + 真实 HTTP：落盘 / 推送 / 拉取 / 改名 / 墓碑删除 / 护栏不误拦） |
 | 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过**（需先 `npm run dist:dir`；本次本地磁盘不足，由 CI 产物覆盖） |
 | **多账号管理** | `node server/verify-admin.js` | **74 通过 / 0 失败** |
 | 后端服务 / 端到端 / 收件箱直传 | `server/verify-server.js` 等 | **17 / 6 / 16 全通过** |
@@ -93,6 +94,11 @@
 
 #### 5. 新增测试与工具
 
+- `scripts/e2e-sync.js`（`npm run e2e:sync`）：**端到端同步验收** —— 真实 Electron +
+  真实后端（`server/src` 那份代码）+ 真实 HTTP，逐个环节验证用户报的那条链路：
+  界面新增客户 → 主进程数据 → 落盘 data.json → 推送服务端 → 另一台设备改/删 → 拉回本机。
+  **负向验证过**：把 `store.js` 里 `customers: state.customers,` 换成别的键名（等价于
+  当初的漏字段 bug），这份验收立刻 9 条失败 —— 说明它真的能抓住这个故障。
 - `test/sync-dataloss.test.js`：护栏单测 + **真实服务端往返**（A 建的客户 B 拉取后必须存在、
   B 的编辑回到 A、墓碑删除生效、>limit 的分页一条不漏，并反证「用 serverTime 作游标会漏记录」）；
 - `test/field-coverage.test.js`：跨层字段覆盖契约（`defaultData`/`publicData`/`applyImported`/
