@@ -24,7 +24,7 @@
 | 真实 Electron 冒烟 | `npm run smoke` | **68 通过 / 0 失败** |
 | **界面交付审计**（新增） | `npm run audit:ui` | **102 个界面状态 / 0 错误**（12 视图 × 4 窗口宽度 + 页签 + 弹窗 × 3 尺寸 + 截图 OCR 复检） |
 | **端到端同步**（新增） | `npm run e2e:sync` | **17 通过 / 0 失败**（真实 Electron + 真实后端 + 真实 HTTP：落盘 / 推送 / 拉取 / 改名 / 墓碑删除 / 护栏不误拦） |
-| 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过**（需先 `npm run dist:dir`；本次本地磁盘不足，由 CI 产物覆盖） |
+| 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过**（本地 `electron-builder --dir` 构建到 C 盘 + 目录联接挂回 `dist/`，绕开 E 盘空间不足） |
 | **多账号管理** | `node server/verify-admin.js` | **74 通过 / 0 失败** |
 | 后端服务 / 端到端 / 收件箱直传 | `server/verify-server.js` 等 | **17 / 6 / 16 全通过** |
 
