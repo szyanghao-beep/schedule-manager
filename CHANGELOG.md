@@ -22,7 +22,7 @@
 | 纯函数单测 + 跨文件契约 | `npm test` | **408 通过 / 0 失败**（v2.3.9 为 385） |
 | 渲染层 UI（jsdom） | `npm run test:ui` | **80 通过 / 0 失败**（v2.3.9 为 75） |
 | 真实 Electron 冒烟 | `npm run smoke` | **68 通过 / 0 失败** |
-| **界面交付审计**（新增） | `npm run audit:ui` | **102 个界面状态 / 0 错误**（12 视图 × 4 窗口宽度 + 页签 + 弹窗 × 3 尺寸 + 截图 OCR 复检） |
+| **界面交付审计**（新增） | `npm run audit:ui` | **109 个界面状态 / 0 错误**（12 视图 × 4 窗口宽度 + 页签 + 弹窗 × 3 尺寸 + 截图 OCR 复检） |
 | **端到端同步**（新增） | `npm run e2e:sync` | **17 通过 / 0 失败**（真实 Electron + 真实后端 + 真实 HTTP：落盘 / 推送 / 拉取 / 改名 / 墓碑删除 / 护栏不误拦） |
 | 打包内容 / 启动验收 | `npm run verify:asar` / `verify:packaged` | **66 / 5 全通过**（本地 `electron-builder --dir` 构建到 C 盘 + 目录联接挂回 `dist/`，绕开 E 盘空间不足） |
 | **多账号管理** | `node server/verify-admin.js` | **74 通过 / 0 失败** |
